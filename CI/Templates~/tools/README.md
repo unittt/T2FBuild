@@ -1,59 +1,97 @@
-# T2FBuild CI Tools
+# T2FBuild CI Templates
 
-Production-grade CI upload scripts. Used by both GitHub Actions workflows and Unity Editor's `TencentCosUploader` (which shells out to these scripts to keep a single source of truth).
+Workflows and tools for automating Unity builds with [T2FBuild](https://github.com/unittt/T2FBuild). The same Python uploader script is used both by GitHub Actions and by the Unity-side `TencentCosUploader`, so there is one source of truth.
 
-## Setup (local dev)
+## One-time project setup
 
-Copy this folder (`CI/Templates~/tools/`) to your project root as `tools/`. The Unity-side uploader will pick up `<project>/tools/upload-cos.py` automatically; fallback is the package's bundled copy.
+Copy the contents of this `Templates~` folder into your Unity project:
+
+```
+<this-package>/CI/Templates~/tools/      →   <your-project>/tools/
+<this-package>/CI/Templates~/workflows/  →   <your-project>/.github/workflows/
+```
+
+Commit both folders. CI runners and the Unity-side uploader both look up `tools/upload-cos.py` relative to the project root.
+
+Install Python dependencies for local development:
 
 ```bash
 pip install -r tools/requirements.txt
 ```
 
-## upload-cos.py
+Configure GitHub secrets:
 
-Uploads asset bundle output to Tencent COS based on a `upload-manifest.json` produced by `GenerateUploadManifestStep`.
+| Secret | Purpose |
+|--------|---------|
+| `UNITY_LICENSE`        | Unity Personal license `.ulf` file content (see [GameCI activation docs](https://game.ci/docs/github/activation)) |
+| `TENCENT_SECRET_ID`    | Tencent Cloud API SecretId |
+| `TENCENT_SECRET_KEY`   | Tencent Cloud API SecretKey |
+| `COS_BUCKET`           | COS bucket (e.g. `mybucket-1234567890`) |
+| `COS_REGION`           | COS region (e.g. `ap-shanghai`) |
 
-### Required environment variables
+## workflows/
 
-| Var | Example |
-|-----|---------|
-| `TENCENT_SECRET_ID`  | `AKIDxxxx...` |
-| `TENCENT_SECRET_KEY` | `xxxx...` |
-| `COS_BUCKET`         | `mybucket-1234567890` |
-| `COS_REGION`         | `ap-shanghai` |
-| `COS_CONCURRENCY` (optional) | `8` |
+### webgl.yml
 
-### Usage
+Builds WebGL via `T2FBuild.Editor.BuildEntry.BuildWebGL`. Triggers:
+
+| Trigger | Behaviour |
+|---------|-----------|
+| `workflow_dispatch` | Manual run; pick version / env / whether to upload. |
+| `push tags v*`      | Auto: derives version from tag, env=`prod`, uploads enabled. |
+
+When upload is on, two COS uploads happen sequentially:
+
+1. **Asset Bundles** — via the upload manifest produced by `GenerateUploadManifestStep`.
+2. **WebGL Player** — directory scan of `Build/WebGL/Player/` to `cos://$COS_BUCKET/webgl/<env>/<version>/`.
+
+The job summary surfaces the playable WebGL URL on COS:
+
+```
+https://<bucket>.cos.<region>.myqcloud.com/webgl/<env>/<version>/index.html
+```
+
+For COS to serve compressed WebGL files (`.br` / `.gz`) correctly, the uploader sets `Content-Encoding` automatically; you do **not** need bucket-level rewrite rules. To allow embedding in another origin, configure COS bucket CORS as needed.
+
+## tools/upload-cos.py
+
+Two upload modes:
 
 ```bash
-export TENCENT_SECRET_ID=...
-export TENCENT_SECRET_KEY=...
-export COS_BUCKET=mybucket-1234567890
-export COS_REGION=ap-shanghai
+# Mode 1: from a Unity-generated manifest (Asset Bundles)
+python tools/upload-cos.py --manifest Build/WebGL/upload-manifest.json
 
-python tools/upload-cos.py Build/WebGL/upload-manifest.json
-python tools/upload-cos.py Build/WebGL/upload-manifest.json --dry-run
+# Mode 2: walk a directory (WebGL player, raw artifacts)
+python tools/upload-cos.py \
+    --dir Build/WebGL/Player \
+    --remote-prefix "webgl/prod/1.0.0/"
 ```
 
-### GitHub Actions snippet
+Both modes set `Content-Type` and `Content-Encoding` per file extension. Notable mappings:
 
-```yaml
-- name: Install COS uploader deps
-  run: pip install -r tools/requirements.txt
+| File ext  | Content-Type                          | Content-Encoding |
+|-----------|---------------------------------------|------------------|
+| `.html`   | `text/html; charset=utf-8`            | — |
+| `.js`     | `application/javascript; charset=utf-8` | — |
+| `.wasm`   | `application/wasm`                    | — |
+| `.js.br`  | `application/javascript; charset=utf-8` | `br` |
+| `.data.br`| `application/octet-stream`            | `br` |
+| `*.gz`    | (underlying type)                     | `gzip` |
 
-- name: Upload AB to Tencent COS
-  run: python tools/upload-cos.py Build/${{ matrix.target }}/upload-manifest.json
-  env:
-    TENCENT_SECRET_ID:  ${{ secrets.TENCENT_SECRET_ID }}
-    TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
-    COS_BUCKET:         ${{ secrets.COS_BUCKET }}
-    COS_REGION:         ${{ secrets.COS_REGION }}
-```
+### Common options
 
-## Manifest schema
+| Flag | Purpose |
+|------|---------|
+| `--dry-run`        | Print operations without uploading. |
+| `--concurrency N`  | Concurrent upload threads (default 8, env `COS_CONCURRENCY`). |
 
-`upload-manifest.json` is generated by Unity. See `Editor/AssetBundle/UploadManifest.cs`.
+### Required env vars
+
+`TENCENT_SECRET_ID`, `TENCENT_SECRET_KEY`, `COS_BUCKET`, `COS_REGION` — same as the GitHub secrets above. Optional: `COS_CONCURRENCY`.
+
+## Upload manifest schema
+
+Generated by `GenerateUploadManifestStep` and consumed by `upload-cos.py --manifest`. Definition in [`Editor/AssetBundle/UploadManifest.cs`](../../Editor/AssetBundle/UploadManifest.cs).
 
 ```json
 {
