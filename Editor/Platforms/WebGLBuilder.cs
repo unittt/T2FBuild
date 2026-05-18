@@ -6,18 +6,18 @@ namespace T2FBuild.Editor
     [PlatformBuilder(BuildTarget.WebGL)]
     public class WebGLBuilder : IPlatformBuilder
     {
-        const string DefaultAssetBundleProvider = "Addressables";
-
-        const string DefaultUploader = "TencentCos";
-
-        public IEnumerable<IBuildStep> GetSteps(BuildContext ctx) => new IBuildStep[]
+        public IEnumerable<IBuildStep> GetSteps(BuildContext ctx)
         {
-            new SwitchPlatformStep(),
-            new ApplyVersionStep(),
-            new BuildAssetBundleStep(DefaultAssetBundleProvider),
-            new GenerateUploadManifestStep(),
-            new UploadAssetBundleStep(DefaultUploader),
-            new BuildPlayerStep(),
-        };
+            var settings = T2FBuildSettings.instance;
+            return new IBuildStep[]
+            {
+                new SwitchPlatformStep(),
+                new ApplyVersionStep(),
+                new BuildAssetBundleStep(settings.assetBundleProvider),
+                new GenerateUploadManifestStep(settings.abRemotePrefixTemplate),
+                new UploadAssetBundleStep(settings.defaultUploader),
+                new BuildPlayerStep(),
+            };
+        }
     }
 }

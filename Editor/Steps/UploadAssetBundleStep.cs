@@ -21,12 +21,9 @@ namespace T2FBuild.Editor
 
         public void Execute(BuildContext ctx)
         {
-            var enabled = Environment.GetEnvironmentVariable("T2FBUILD_UPLOAD_ENABLED");
-            var isEnabled = enabled != null
-                            && (enabled.Equals("true", StringComparison.OrdinalIgnoreCase) || enabled == "1");
-            if (!isEnabled)
+            if (!IsUploadEnabled())
             {
-                Debug.Log("[T2FBuild] Upload skipped (set T2FBUILD_UPLOAD_ENABLED=true to enable).");
+                Debug.Log("[T2FBuild] Upload skipped. Set T2FBUILD_UPLOAD_ENABLED=true, or enable 'Upload > Enabled By Default' in Project Settings > T2FBuild.");
                 return;
             }
 
@@ -68,6 +65,16 @@ namespace T2FBuild.Editor
             }
 
             Debug.Log($"[T2FBuild] Upload complete via '{_uploaderName}': {result.FilesUploaded} files, {result.TotalBytesUploaded} bytes.");
+        }
+
+        static bool IsUploadEnabled()
+        {
+            var enabled = Environment.GetEnvironmentVariable("T2FBUILD_UPLOAD_ENABLED");
+            if (enabled != null)
+            {
+                return enabled.Equals("true", StringComparison.OrdinalIgnoreCase) || enabled == "1";
+            }
+            return T2FBuildSettings.instance.uploadEnabledByDefault;
         }
     }
 }
