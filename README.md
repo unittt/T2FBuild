@@ -33,9 +33,10 @@ Unity 自动化打包框架。
 "com.t2f.build": "file:../../T2FBuild"
 ```
 
-## 设计文档
+## 设计文档与路线图
 
-完整设计参考 [docs/T2FBuild-Design.md](https://github.com/unittt/BounceBlast/blob/main/docs/T2FBuild-Design.md)。
+- [docs/design.md](docs/design.md) — 完整架构设计、抽象层、CI 编排、扩展指南
+- [docs/roadmap.md](docs/roadmap.md) — 里程碑状态、计划中工作、技术债
 
 ## License
 
