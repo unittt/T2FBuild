@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 
 namespace T2FBuild.Editor
 {
@@ -33,28 +32,9 @@ namespace T2FBuild.Editor
         {
             if (_providers != null) return;
             _providers = new Dictionary<string, Type>();
-
-            var iface = typeof(IAssetBundleProvider);
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            foreach (var (type, attr) in RegistryScanner.Scan<IAssetBundleProvider, AssetBundleProviderAttribute>())
             {
-                Type[] types;
-                try
-                {
-                    types = asm.GetTypes();
-                }
-                catch (ReflectionTypeLoadException e)
-                {
-                    types = e.Types;
-                }
-
-                foreach (var t in types)
-                {
-                    if (t == null || t.IsAbstract || t.IsInterface) continue;
-                    if (!iface.IsAssignableFrom(t)) continue;
-                    var attr = t.GetCustomAttribute<AssetBundleProviderAttribute>();
-                    if (attr == null) continue;
-                    _providers[attr.Name] = t;
-                }
+                _providers[attr.Name] = type;
             }
         }
     }

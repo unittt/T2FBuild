@@ -1,0 +1,19 @@
+{
+    "name": "T2FBuild.Editor.TencentCos",
+    "rootNamespace": "T2FBuild.Editor.Uploaders.TencentCos",
+    "references": [
+        "T2FBuild.Editor",
+        "T2FBuild.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
