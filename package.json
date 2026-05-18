@@ -1,0 +1,21 @@
+{
+  "name": "com.t2f.build",
+  "displayName": "T2F Build",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "Unity 自动化打包框架。支持 Android / iOS / WebGL / 微信小游戏；AB 系统（Addressables / YooAsset）与上传层（腾讯云 COS 等）通过 Provider 接口可插拔扩展；基于 GameCI + GitHub Actions。",
+  "author": {
+    "name": "qiu fei",
+    "url": "https://github.com/unittt/T2FBuild"
+  },
+  "keywords": [
+    "build",
+    "ci",
+    "github-actions",
+    "game-ci",
+    "addressables",
+    "asset-bundle",
+    "tencent-cos"
+  ],
+  "dependencies": {}
+}
