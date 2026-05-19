@@ -1,0 +1,348 @@
+# CNB × WeChat MiniGame 端到端配置指南
+
+> 把 T2FBuild 框架在 CNB 上跑通微信小游戏自动打包的实操手册。框架架构与设计权衡见 [design.md](design.md)。
+
+适用范围：当前仓库托管在 [cnb.cool](https://cnb.cool)，目标产物是微信小游戏（main package + AB 资源 + 首包数据）。WebGL/Android/iOS 流程类似，差异点在 §7 末尾注明。
+
+---
+
+## 0. 前置依赖
+
+确认以下条件已满足：
+
+- [x] Unity **2022.3.x** 已激活 Personal License（本机已能正常打开项目）
+- [x] 项目依赖 `com.qq.weixin.minigame` 包已装（`Packages/manifest.json` 中存在）
+- [x] T2FBuild 包已通过 UPM Git 或 git submodule 接入
+- [x] 拥有一个腾讯云 COS Bucket 和一对 SecretId / SecretKey
+
+---
+
+## 1. 准备 Unity License（`.ulf` → base64）
+
+**重要**：Unity Hub 本机激活后，`.ulf` 已存在于：
+
+```
+Windows:  C:\ProgramData\Unity\Unity_lic.ulf
+macOS:    /Library/Application Support/Unity/Unity_lic.ulf
+Linux:    /var/lib/unity/Unity_lic.ulf
+```
+
+**直接 base64 编码现成文件**，不需要走 `.alf` 流程：
+
+```bash
+# Git Bash / WSL
+base64 -w0 "/c/ProgramData/Unity/Unity_lic.ulf" > license.b64
+
+# PowerShell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\ProgramData\Unity\Unity_lic.ulf")) `
+  | Out-File license.b64 -NoNewline -Encoding ASCII
+```
+
+`.alf` 流程（已可跳过，仅在本地 `.ulf` 在容器内被拒时回退）：
+
+```bash
+docker run --rm -v "$PWD":/work -w /work unityci/editor:2022.3.14f1-webgl-3 \
+  unity-editor -batchmode -nographics -createManualActivationFile -logFile -
+# 把生成的 Unity_v2022.x.alf 上传 https://license.unity3d.com/manual 换 .ulf
+```
+
+> Unity Personal License 与硬件指纹（MAC/主机名）绑定。本机 `.ulf` 拿进 Docker 通常能用；偶尔会被拒，那时再走 `.alf` 流程在容器里激活一次即可。
+
+---
+
+## 2. 准备腾讯云 COS
+
+- 建 Bucket（如 `bounceblast-1234567890`），记录 region（如 `ap-shanghai`）
+- 在 CAM 给子账号最小权限：COS 写入相关策略
+- 拿到 `SecretId` / `SecretKey`
+
+---
+
+## 3. Secrets 存放方案（三选一）
+
+CNB 没有 web UI Secrets，通过 `imports:` 引用 `envs.yml`。按需选：
+
+### Option A —— 内联到 `.cnb.yml`（最简单）
+
+`.cnb.yml` 里删掉 `imports:`，把每个 pipeline 的 `env:` 块直接写满：
+
+```yaml
+env:
+  UNITY_LICENSE_BASE64: |
+    <license.b64 内容>
+  TENCENT_SECRET_ID: AKID...
+  TENCENT_SECRET_KEY: ...
+  COS_BUCKET: bounceblast-1234567890
+  COS_REGION: ap-shanghai
+```
+
+适用：单人项目，secrets 跟代码同密级。
+
+### Option B —— 同仓库 `envs.yml`（**单人开发推荐**）
+
+仓库根建 `envs.yml`，`.cnb.yml` 改 `imports:` 指向当前仓库：
+
+```yaml
+# .cnb.yml
+x-imports: &imports
+  - https://cnb.cool/<your-org>/<your-repo>/-/blob/main/envs.yml
+```
+
+```yaml
+# envs.yml（提交到仓库，不要进 .gitignore——CI 要拉）
+env:
+  UNITY_LICENSE_BASE64: |
+    <license.b64 内容>
+  TENCENT_SECRET_ID: AKID...
+  TENCENT_SECRET_KEY: ...
+  COS_BUCKET: bounceblast-1234567890
+  COS_REGION: ap-shanghai
+```
+
+适用：单人 / 小团队，所有有代码读权限的人也该看 secrets。
+
+### Option C —— 独立私有 secrets repo（团队场景）
+
+另建私有仓库 `https://cnb.cool/<your-org>/secrets`，`envs.yml` 内容同上。`.cnb.yml`：
+
+```yaml
+x-imports: &imports
+  - https://cnb.cool/<your-org>/secrets/-/blob/main/envs.yml
+```
+
+适用：要给某些人代码权限但不给 secrets 权限；或多个项目共用同一套 secrets 集中管理。
+
+---
+
+## 4. 配置 T2FBuildSettings
+
+Unity → `Edit > Project Settings > T2FBuild > WeChat MiniGame`：
+
+| 字段 | 值 | 备注 |
+|---|---|---|
+| AppId | `wxXXXXXXXXXXXXXXXX` | 微信公众平台 → 小游戏 → 开发设置 |
+| CDN Base URL | `https://<bucket>.cos.<region>.myqcloud.com/` | 与 §2 COS Bucket 对应；尾部带 `/` |
+| Custom Node Path | 留空 | CNB 容器走系统 PATH |
+| First Package Glob | `webgl.data*` | 默认值，Unity 2022 命名约定 |
+| First Package Remote Prefix | `wechat/{env}/{version}/data/` | 默认值；token 自动替换 |
+| Main Package Size Limit (MB) | `4` | 微信平台硬限制 |
+
+**保存后 commit** `ProjectSettings/T2FBuildSettings.asset`。
+
+---
+
+## 5. 本地先跑通（强烈推荐）
+
+避免在 CNB 上才发现 SDK 配置问题：
+
+```csharp
+// Unity Console
+T2FBuild.Editor.BuildEntry.BuildWeChat();
+```
+
+确认：
+- `Build/WebGL_wechat/minigame/` 出现
+- Console 中 `[T2FBuild] WeChat main package OK: X MB (limit 4 MB ...)`
+- 把 `minigame/` 拖进微信开发者工具能正常打开 + 预览运行
+
+本地过了再上 CNB。
+
+---
+
+## 6. 安装 CI 模板到项目
+
+Unity → `Window > T2FBuild > CI Template Installer`：
+
+1. **CI Platform** 下拉选 **CNB**
+2. 勾选 `cnb.yml` + `Also copy tools/`
+3. 点 **Apply**
+
+写入：
+- 仓库根 `.cnb.yml`
+- 仓库根 `tools/upload-cos.py`、`tools/requirements.txt`、`tools/README.md`
+
+---
+
+## 7. 编辑 `.cnb.yml`
+
+定位顶部：
+
+```yaml
+x-imports: &imports
+  - https://cnb.cool/REPLACE_ME_ORG/secrets/-/blob/main/envs.yml
+```
+
+按 §3 选的方案改：
+- **Option A**：删掉 `x-imports`、`imports: *imports` 行，把 secrets 写到每个 pipeline 的 `env:` 里
+- **Option B**：改成 `https://cnb.cool/<your-org>/<your-repo>/-/blob/main/envs.yml`
+- **Option C**：改成 `https://cnb.cool/<your-org>/secrets/-/blob/main/envs.yml`
+
+---
+
+## 8. 检查 `.gitignore`
+
+确保：
+- `Build/` **被** ignore（构建产物别推上去）
+- `tools/` **不被** ignore（CI 从仓库读 `tools/upload-cos.py`）
+- `.cnb.yml` **不被** ignore
+- 若用 Option B：`envs.yml` **不被** ignore
+
+---
+
+## 9. Commit & Push
+
+```bash
+git add .cnb.yml tools/ ProjectSettings/T2FBuildSettings.asset
+# Option B 额外：
+git add envs.yml
+git commit -m "ci(cnb): add WeChat MiniGame pipeline"
+git push origin main
+```
+
+> T2FBuild 是 git submodule，前面 §4 / §6 涉及框架自身的改动需要先在 `Assets/T2FBuild/` 子模块内 commit + push，再回主仓 commit submodule pointer。
+
+---
+
+## 10. 触发首次构建
+
+### 手动触发（推荐首跑）
+
+打开 CNB 流水线页：`https://cnb.cool/<your-org>/<your-repo>` → 流水线 → **Run**
+
+选 `web_trigger_wechat`，表单填：
+
+| 参数 | 首跑值 | 说明 |
+|---|---|---|
+| `VERSION` | `0.0.1` | 任意 semver |
+| `ENV` | `dev` | 写入 manifest 的 prefix |
+| `UPLOAD` | `false` | **首跑设 false** — 只验证构建链路，不传 COS |
+
+### 标签触发（生产）
+
+```bash
+git tag wx-v0.0.1
+git push origin wx-v0.0.1
+```
+
+自动用 prod env + UPLOAD=true 跑。
+
+---
+
+## 11. 监控关键 stage
+
+按顺序看 log：
+
+| Stage | 期望输出 | 失败信号 |
+|---|---|---|
+| `install-node` | `v20.x.x` | apt 报错 → 网络问题 |
+| `activate-unity-license` | `Next license update check is after` | `License is invalid` → 走 §1 `.alf` 流程 |
+| `build-wechat` | Addressables build + WXConvertCore 日志持续滚动 | 静默 >10min 被杀 → 见 §13 心跳 |
+| `validate-wechat-main-package-size` | `WeChat main package OK: X MB` | `too large` → 调整 First Package Glob 或缩资源 |
+| `upload-asset-bundles` | `Uploaded N files, M bytes total` | 仅在 UPLOAD=true 时跑 |
+| `upload-wechat-first-package` | 同上 | 同上 |
+
+冷启动总时长 25-45 分钟（Library 缓存空）；热启动 8-15 分钟。
+
+---
+
+## 12. 取产物 → 提交微信
+
+**当前模板的局限**：`pack-minigame-artifact` 只在容器内 `tar`，容器退出就丢。要拿到本地有两种办法：
+
+### 方案 1（暂时）：本地重跑
+
+CI 上验证 secrets / 上传链路即可，最终用于提交微信的产物**从本地 §5 那一步拿**——本地 `Build/WebGL_wechat/minigame/` 直接拖进微信开发者工具上传。
+
+### 方案 2（待补）：minigame.tar.gz 也上传 COS
+
+需要给 `.cnb.yml` 末尾加一步：
+
+```yaml
+- name: upload-minigame-archive
+  script: |
+    if [ "$UPLOAD" != "true" ]; then exit 0; fi
+    python tools/upload-cos.py \
+      --dir Build/WebGL_wechat \
+      --remote-prefix "wechat-artifacts/${BUILD_VERSION}/" \
+      # 限定只传 minigame.tar.gz（upload-cos.py 当前不支持 glob 过滤，
+      # 临时用 tar 后单独建目录再传）
+```
+
+这步框架还没做，下次需求时再补。
+
+---
+
+## 13. 已知坑点
+
+### Library 缓存挂载路径
+
+模板假设代码挂在 `/workspace/`，volume 是 `/workspace/Library:copy-on-write`。如果 CNB 实际路径不同，第一次缓存不会生效。诊断：
+
+```yaml
+- name: debug-pwd
+  script: pwd && ls -la
+```
+
+按实际路径修 volume。
+
+### `unity-editor` 命令名
+
+unityci/editor 镜像内可执行文件应该叫 `unity-editor`。如果 `command not found` 试：
+- `/opt/unity/Editor/Unity`
+- `xvfb-run -a /opt/unity/Editor/Unity`
+
+### 10 分钟无日志超时
+
+Unity 资源 import 阶段可能长时间静默。在 build stage 外套心跳：
+
+```yaml
+- name: build-wechat
+  script: |
+    set -e
+    ( while true; do echo "[heartbeat $(date +%H:%M:%S)]"; sleep 60; done ) &
+    HEARTBEAT_PID=$!
+    unity-editor -batchmode -nographics -logFile - \
+      -projectPath "$PWD" \
+      -executeMethod T2FBuild.Editor.BuildEntry.BuildWeChat \
+      -quit
+    RET=$?
+    kill $HEARTBEAT_PID
+    exit $RET
+```
+
+### License 在容器内被拒
+
+Unity 验证硬件指纹严格时本机 `.ulf` 可能不被容器接受。回退方案：
+
+```bash
+# 在与 CI 相同的镜像里激活
+docker run --rm -v "$PWD":/work -w /work unityci/editor:2022.3.14f1-webgl-3 \
+  unity-editor -batchmode -nographics -createManualActivationFile -logFile -
+# 上传 .alf 到 https://license.unity3d.com/manual 换 .ulf，再 base64
+```
+
+---
+
+## 14. 推荐首跑 ramp-up 顺序
+
+每步只验证一件事，出问题好定位：
+
+1. ✅ §5 本地 Unity 跑 `BuildEntry.BuildWeChat()` 出 `minigame/`
+2. ✅ §10 CNB `web_trigger_wechat`，`UPLOAD=false` → 验证 license 激活 + 构建链路
+3. ✅ CNB `web_trigger_wechat`，`UPLOAD=true` → 验证 COS 上传链路
+4. ✅ `git tag wx-v0.0.1 && git push --tags` → 验证生产路径（prod env + 自动上传）
+5. ✅ COS Bucket 看到 `ab/WebGL/prod/0.0.1/*` 和 `wechat/prod/0.0.1/data/webgl.data*`
+6. ✅ 本地 `minigame/` 拖进微信开发者工具 → 验证首屏能从 COS 拉首包数据
+
+---
+
+## 15. WebGL 流程的差异
+
+WebGL（非小游戏）走 `web_trigger_webgl` 或 `v*` 标签。区别：
+
+- 不需要 §4 中 WeChat 那几个 settings 字段
+- `cnb.yml` 里 WebGL 块**不装 Node**（微信小游戏才需要）
+- 上传第二条是 `--dir Build/WebGL/Player --remote-prefix webgl/{env}/{version}/`（Player 整目录作为静态站点）
+- 不存在「主包大小检查」「首包数据上传」两步
+
+其它机制（license、secrets、Library 缓存）完全一致。

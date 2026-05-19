@@ -37,6 +37,7 @@ Unity 自动化打包框架。
 
 - [docs/design.md](docs/design.md) — 完整架构设计、抽象层、CI 编排、扩展指南
 - [docs/roadmap.md](docs/roadmap.md) — 里程碑状态、计划中工作、技术债
+- [docs/cnb-wechat-setup.md](docs/cnb-wechat-setup.md) — 在 CNB 上跑通微信小游戏自动打包的实操手册
 
 ## License
 
