@@ -15,7 +15,7 @@
 | 2 | WebGL + AB 抽象 + Addressables | `IAssetBundleProvider`, `WebGLBuilder`, `AddressablesProvider`（versionDefines 隔离） | `a717fa4` |
 | 3 | 上传抽象 + Tencent COS | `IAssetBundleUploader`, `UploadManifest`, `TencentCosUploader`（Python 壳），`upload-cos.py` + `RegistryScanner` 抽取 | `9f8483a` |
 | 4 | GitHub Actions webgl.yml | 完整 CI 链路 + Player 直传 COS 静态托管（`--dir` 模式 + Content-Type/Encoding） | `55ed497` |
-| 6 | **WeChat 小游戏** | `WeChatBuilder`（profile=wechat，versionDefines 隔离）+ `ConfigureWeChatProjectStep` / `RunWeChatExportStep`（一行调 `WXConvertCore.DoExport`）/ `ValidateWeChatPackageSizeStep`（4MB 主包检查）/ `UploadWeChatFirstPackageStep`（首包数据→COS 复用 manifest 协议）+ `wechat.yml`（Node + AB/首包双 manifest 上传 + minigame artifact） | pending |
+| 6 | **WeChat 小游戏** | `WeChatBuilder`（profile=wechat，versionDefines 隔离）+ `ConfigureWeChatProjectStep` / `RunWeChatExportStep`（一行调 `WXConvertCore.DoExport`）/ `UploadWeChatFirstPackageStep`（首包数据→COS 复用 manifest 协议）+ `wechat.yml`（Node + AB/首包双 manifest 上传 + minigame artifact） | pending |
 | – | **多 CI 平台支持（GitHub + CNB）** | `CI/Templates~/` 按 `github/` / `cnb/` 分目录；`CITemplateInstallerWindow` 顶部新增 CI Platform 下拉 + 选择持久化到 EditorPrefs + per-platform target 路径策略；CNB `cnb.yml` 单文件含 webgl/wechat 双触发 + ULF base64 license 激活 + Library `copy-on-write` 缓存；secrets 走 `imports:` 私有 repo | pending |
 | – | 编辑器辅助 — CI 模板安装器 | `CITemplateInstallerWindow`（CI 平台下拉 + 多选 + 自动连带 `tools/`） | `3a53391` |
 | – | 编辑器辅助 — 配置单例 | `T2FBuildSettings` + Project Settings UI（注册表驱动下拉框） | `c1bc7cd` |

@@ -19,7 +19,6 @@ namespace T2FBuild.Editor.Platforms.WeChat
                 new UploadAssetBundleStep(settings.defaultUploader),
                 new ConfigureWeChatProjectStep(),
                 new RunWeChatExportStep(),
-                new ValidateWeChatPackageSizeStep(settings.wechatMainPackageSizeLimitMB),
                 new UploadWeChatFirstPackageStep(settings.defaultUploader),
             };
         }

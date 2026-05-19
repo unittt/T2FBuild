@@ -41,7 +41,9 @@ namespace T2FBuild.Editor.Uploaders.TencentCos
                 return new UploadResult
                 {
                     Success = false,
-                    Error = "Python executable not found (tried 'python' and 'python3'). Install Python 3 and ensure it is on PATH.",
+                    Error = "Python executable not found. Tried 'python', 'python3', 'py' on PATH. " +
+                            "Fix: install Python 3 (https://www.python.org/downloads/) AND restart Unity Hub so it picks up the updated PATH, " +
+                            "OR set Custom Python Path in Edit > Project Settings > T2FBuild > Upload to point at python.exe directly.",
                 };
             }
 
@@ -54,10 +56,15 @@ namespace T2FBuild.Editor.Uploaders.TencentCos
                 CreateNoWindow = true,
                 WorkingDirectory = Path.GetDirectoryName(scriptPath),
             };
+            if (python == "py")
+            {
+                psi.ArgumentList.Add("-3");
+            }
             psi.ArgumentList.Add(scriptPath);
             psi.ArgumentList.Add(req.ManifestPath);
 
-            Debug.Log($"[T2FBuild][TencentCos] $ {python} \"{scriptPath}\" \"{req.ManifestPath}\"");
+            var argsForLog = python == "py" ? $"-3 \"{scriptPath}\" \"{req.ManifestPath}\"" : $"\"{scriptPath}\" \"{req.ManifestPath}\"";
+            Debug.Log($"[T2FBuild][TencentCos] $ {python} {argsForLog}");
 
             using var process = Process.Start(psi);
             if (process == null)
@@ -114,14 +121,21 @@ namespace T2FBuild.Editor.Uploaders.TencentCos
 
         static string LocatePython()
         {
-            foreach (var name in new[] { "python", "python3" })
+            var custom = T2FBuildSettings.instance?.customPythonPath;
+            if (!string.IsNullOrEmpty(custom))
+            {
+                if (File.Exists(custom)) return custom;
+                Debug.LogWarning($"[T2FBuild][TencentCos] customPythonPath '{custom}' does not exist; falling back to PATH lookup.");
+            }
+
+            foreach (var name in new[] { "python", "python3", "py" })
             {
                 try
                 {
                     using var test = Process.Start(new ProcessStartInfo
                     {
                         FileName = name,
-                        Arguments = "--version",
+                        Arguments = name == "py" ? "-3 --version" : "--version",
                         UseShellExecute = false,
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,

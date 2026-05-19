@@ -27,7 +27,7 @@ macOS:    /Library/Application Support/Unity/Unity_lic.ulf
 Linux:    /var/lib/unity/Unity_lic.ulf
 ```
 
-> 推荐使用 §3 Option B 介绍的 **CI Secrets Editor**（`Window > T2FBuild > CI Secrets Editor`）一次性填完 `.ulf` 编码 + 4 个 COS 字段——把当前 §1/§2 + §3 Option B 几步合一。本节作为命令行兜底方式保留。
+> 推荐使用 §4 的 **Project Settings > T2FBuild > Secrets** section（位于 `Edit > Project Settings > T2FBuild`，所有 secrets 字段直接编辑，后端落 envs.yml）一次性填完 `.ulf` 编码 + 4 个 COS 字段——把当前 §1/§2 + §3 Option B 几步合一。本节作为命令行兜底方式保留。
 
 ### 命令行方式
 
@@ -103,18 +103,24 @@ env:
 
 适用：单人 / 小团队，所有有代码读权限的人也该看 secrets。
 
-#### 用 CI Secrets Editor 自动填写（推荐）
+#### 用 Project Settings > Secrets section 自动填写（推荐）
 
-打开 `Window > T2FBuild > CI Secrets Editor`，一个窗口完成 envs.yml 全部 5 个字段：
+打开 `Edit > Project Settings > T2FBuild`，最下方的「Secrets (envs.yml)」section 一窗填完 envs.yml 全部 5 个字段：
 
-- **envs.yml 路径**：启动时自动定位仓库根 `envs.yml`，可改路径；点 **Reload** 反向解析已有值预填回 5 个字段（已填的字段不会丢，可见已存在状态后**只改要改的**）
-- **Unity License**：`.ulf` 自动检测路径（Windows/macOS/Linux），编码后 base64 长度直接显示；可手动 Browse 或 Auto-Detect 重置
-- **Tencent COS**：4 个字段独立编辑；Secret Key 走密码字段掩码；Bucket / Region 自动从 `Project Settings > T2FBuild > Tencent COS` 取值作为 hint，按「Use ...」按钮一键填入
-- **写入策略**：单按钮 **Write All to envs.yml** 一次性更新 5 个字段，**保留 envs.yml 里 5 个标准字段之外的所有自定义 key 和注释**（行级合并，不重写整个文件）
+- **加载现有值**：进入面板自动读取仓库根 `envs.yml`，把已填字段灌回 UI（Secret Key 走密码字段掩码；License 显示长度而不是完整 base64）
+- **Tencent Secret ID / Secret Key**：从腾讯云 CAM 复制；密码字段防肩窥但可 `Ctrl+C` 复制
+- **Unity License**：「Load from .ulf...」按钮自动检测 `C:\ProgramData\Unity\Unity_lic.ulf`（Mac / Linux 同理），一键 base64 编码灌入字段
+- **Bucket / Region**：**不在 Secrets section 重复**——它们已经在上面的「Tencent COS」section 里维护，Save 时自动一起写入 envs.yml
+- **保存策略**：表单值只活在 UI 内存，**点「Save to envs.yml」按钮才落盘**，避免每次敲键写文件；上方「Reload」可丢弃未保存改动重读
+
+**写入策略**：
+- 行级合并——envs.yml 里 5 个标准字段之外的所有自定义 key 和注释**全部保留**
+- BuildWindow 启动构建时自动 inject envs.yml 中所有字段到进程环境变量，构建结束恢复
+- 同一份 envs.yml 同时被本地 BuildWindow + CNB pipeline (`imports:`) 消费，**单一来源**
 
 **安全约束**：
-- 表单值只活在窗口内存里，关窗即丢——绝不写 EditorPrefs / ScriptableObject
-- Secret Key 字段掩码显示但可以被 `Ctrl+C` 复制（YAML 源文件本来就在仓库内可读，掩码主要防肩窥）
+- T2FBuildSettings.asset（committed）只存非密配置；secrets 落在 envs.yml（按 §3 选项决定要不要 commit）
+- Secret Key 字段值在 UI 内存中，永不持久化到 EditorPrefs / ScriptableObject
 - 不调用任何外部 API（无连接测试、无凭据校验），凭据仅本地读写
 
 ### Option C —— 独立私有 secrets repo（团队场景）
@@ -153,7 +159,7 @@ Unity → `Edit > Project Settings > T2FBuild`：
 | Bucket | `bounceblast-1234567890` | 与 §2 COS Bucket 对应；公开标识符，非密钥 |
 | Region | `ap-shanghai` | 公开标识符 |
 
-这两个字段供 CI Secrets Editor 作为 envs.yml 字段的 hint，同时在「WeChat MiniGame > CDN Base URL」为空时**自动派生**运行时 CDN URL：`https://<Bucket>.cos.<Region>.myqcloud.com/`。
+这两个字段同时作为 envs.yml 中 `COS_BUCKET` / `COS_REGION` 的来源（Secrets section 保存时自动写入），并在「WeChat MiniGame > CDN Base URL」为空时**自动派生**运行时 CDN URL：`https://<Bucket>.cos.<Region>.myqcloud.com/`。
 
 ### WeChat MiniGame
 
@@ -164,7 +170,8 @@ Unity → `Edit > Project Settings > T2FBuild`：
 | Custom Node Path | 留空 | CNB 容器走系统 PATH |
 | First Package Glob | `webgl.data*` | 默认值，Unity 2022 命名约定 |
 | First Package Remote Prefix | `wechat/{env}/{version}/data/` | 默认值；token 自动替换 |
-| Main Package Size Limit (MB) | `4` | 微信平台硬限制 |
+
+主包大小校验**不**由框架做——微信 SDK 自身的「首资源管理 CDN 模式」（`MiniGameConfig.asset` 的 `assetLoadType` 配置）+ 微信后台发布校验已经把关，框架重复校验只会误伤。
 
 **保存后 commit** `ProjectSettings/T2FBuildSettings.asset`。
 
@@ -182,7 +189,6 @@ Unity → `Edit > Project Settings > T2FBuild`：
 
 确认：
 - `Build/WebGL_wechat/minigame/` 出现
-- Console 中 `[T2FBuild] WeChat main package OK: X MB (limit 4 MB ...)`
 - 窗口底部状态条显示 `Build succeeded` + 耗时
 - 把 `minigame/` 拖进微信开发者工具能正常打开 + 预览运行
 
@@ -433,6 +439,6 @@ WebGL（非小游戏）走 `web_trigger_webgl` 或 `v*` 标签。区别：
 - 不需要 §4 中 WeChat 那几个 settings 字段
 - `cnb.yml` 里 WebGL 块**不装 Node**（微信小游戏才需要）
 - 上传第二条是 `--dir Build/WebGL/Player --remote-prefix webgl/{env}/{version}/`（Player 整目录作为静态站点）
-- 不存在「主包大小检查」「首包数据上传」两步
+- 不存在「首包数据上传」一步
 
 其它机制（license、secrets、Library 缓存）完全一致。

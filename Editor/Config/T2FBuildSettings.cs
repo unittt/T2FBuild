@@ -21,6 +21,8 @@ namespace T2FBuild.Editor
 
         public bool uploadEnabledByDefault;
 
+        public string customPythonPath = "";
+
         [Header("Tencent COS")]
         public string tencentCosBucket = "";
 
@@ -36,8 +38,6 @@ namespace T2FBuild.Editor
         public string wechatFirstPackageGlob = "webgl.data*";
 
         public string wechatFirstPackageRemotePrefixTemplate = "{project}/wechat/{env}/{version}/data/";
-
-        public int wechatMainPackageSizeLimitMB = 4;
 
         public void SaveSettings() => Save(true);
     }

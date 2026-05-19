@@ -155,10 +155,10 @@ namespace T2FBuild.Editor
             if (_uploadEnabled)
             {
                 EditorGUILayout.HelpBox(
-                    "Upload is ENABLED — files will be pushed to Tencent COS using credentials from environment " +
-                    "(TENCENT_SECRET_ID / TENCENT_SECRET_KEY / COS_BUCKET / COS_REGION). " +
-                    "Make sure these are set in your shell before launching Unity.",
-                    MessageType.Warning);
+                    "Upload is ENABLED — credentials will be loaded from envs.yml in the project root " +
+                    "(configure via Edit > Project Settings > T2FBuild > Secrets). " +
+                    "If envs.yml is missing, falls back to TENCENT_SECRET_ID / TENCENT_SECRET_KEY / COS_BUCKET / COS_REGION in shell env.",
+                    MessageType.Info);
             }
         }
 
@@ -186,7 +186,7 @@ namespace T2FBuild.Editor
             EditorGUILayout.LabelField("Tips", EditorStyles.miniBoldLabel);
             EditorGUILayout.LabelField("• Watch the Console for per-step progress and errors.", EditorStyles.miniLabel);
             EditorGUILayout.LabelField("• Output goes to Build/<Target>[_<profile>]/ (relative to project root).", EditorStyles.miniLabel);
-            EditorGUILayout.LabelField("• To upload, set Tencent COS env vars in the shell that launched Unity.", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("• To upload, fill Secrets section in Edit > Project Settings > T2FBuild (writes to envs.yml).", EditorStyles.miniLabel);
         }
 
         void RefreshBuilders()
@@ -262,7 +262,16 @@ namespace T2FBuild.Editor
                 : $"{option.Target} ({option.Profile})";
 
             EditorUtility.DisplayProgressBar("T2FBuild", $"Building {label}…", 0.5f);
-            var prevUploadVar = Environment.GetEnvironmentVariable(EnvVarUploadEnabled);
+
+            var envsPath = EnvsYmlFile.ResolveDefaultPath();
+            var injectedOriginals = EnvsYmlFile.InjectIntoProcess(envsPath);
+            var envsLoadedCount = injectedOriginals.Count;
+
+            if (!injectedOriginals.ContainsKey(EnvVarUploadEnabled))
+            {
+                injectedOriginals[EnvVarUploadEnabled] = Environment.GetEnvironmentVariable(EnvVarUploadEnabled);
+            }
+
             try
             {
                 Environment.SetEnvironmentVariable(EnvVarUploadEnabled, _uploadEnabled ? "true" : "false");
@@ -270,9 +279,13 @@ namespace T2FBuild.Editor
 
                 var elapsed = DateTime.Now - startedAt;
                 var outputAbs = Path.GetFullPath(ctx.OutputRoot);
+                var envsSummary = envsLoadedCount > 0
+                    ? $"  Loaded {envsLoadedCount} env vars from envs.yml.\n"
+                    : "  No envs.yml found — used shell env vars only.\n";
                 _lastStatus =
                     $"Build succeeded: {label}\n" +
                     $"  Version: {ctx.Version}, Env: {ctx.Env}, Upload: {_uploadEnabled}\n" +
+                    envsSummary +
                     $"  Output: {outputAbs}\n" +
                     $"  Elapsed: {elapsed.TotalSeconds:F1}s";
                 _lastStatusType = MessageType.Info;
@@ -285,7 +298,7 @@ namespace T2FBuild.Editor
             }
             finally
             {
-                Environment.SetEnvironmentVariable(EnvVarUploadEnabled, prevUploadVar);
+                EnvsYmlFile.RestoreProcess(injectedOriginals);
                 EditorUtility.ClearProgressBar();
             }
         }
