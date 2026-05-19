@@ -47,8 +47,13 @@ namespace T2FBuild.Editor.Uploaders.TencentCos
             if (!File.Exists(localFile)) throw new FileNotFoundException(localFile);
 
             var host = $"{_bucket}.cos.{_region}.myqcloud.com";
-            var pathname = "/" + string.Join("/", (objectKey ?? string.Empty).Split('/').Select(EncodeSegment));
-            var url = $"https://{host}{pathname}";
+            var normalizedKey = (objectKey ?? string.Empty).Replace('\\', '/');
+            // Signature uses RAW (URL-decoded) pathname; request URL uses encoded pathname.
+            // COS service decodes the request path before signing on its end, so client must
+            // sign against the raw form to match.
+            var pathnameForSign = "/" + normalizedKey;
+            var pathnameForUrl = "/" + string.Join("/", normalizedKey.Split('/').Select(EncodeSegment));
+            var url = $"https://{host}{pathnameForUrl}";
 
             using var stream = new FileStream(localFile, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 81920, useAsync: true);
             using var content = new StreamContent(stream);
@@ -68,7 +73,7 @@ namespace T2FBuild.Editor.Uploaders.TencentCos
             {
                 { "host", host },
             };
-            var authorization = SignV5("put", pathname, new SortedDictionary<string, string>(StringComparer.Ordinal), signedHeaders);
+            var authorization = SignV5("put", pathnameForSign, new SortedDictionary<string, string>(StringComparer.Ordinal), signedHeaders);
             request.Headers.TryAddWithoutValidation("Authorization", authorization);
 
             using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);

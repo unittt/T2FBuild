@@ -41,9 +41,12 @@ namespace T2FBuild.Editor.Platforms.WeChat
             var matches = Directory.GetFiles(miniGameDir, glob, SearchOption.TopDirectoryOnly);
             if (matches.Length == 0)
             {
-                throw new InvalidOperationException(
+                Debug.Log(
                     $"[T2FBuild] No files matched glob '{glob}' in {miniGameDir}. " +
-                    "Inspect the WeChat export output and adjust wechatFirstPackageGlob.");
+                    "Skipping first-package upload — this is normal when the WeChat SDK is configured with " +
+                    "subPackages / 首资源 CDN mode (data files routed through WeChat's CDN automatically). " +
+                    "Only relevant if you want to host first-package data on your own COS+CDN.");
+                return;
             }
 
             var manifest = BuildManifest(ctx, miniGameDir, matches, remotePrefix);
