@@ -12,10 +12,6 @@ namespace T2FBuild.Editor
     {
         const string MenuPath = "Window/T2FBuild/CI Template Installer";
 
-        const string PackageToolsRelativePath = "CI/Templates~/tools";
-
-        const string ProjectToolsRelativePath = "tools";
-
         const string EditorPrefsPlatformKey = "T2FBuild.CIPlatform";
 
         static readonly CIPlatformDef[] Platforms =
@@ -43,19 +39,14 @@ namespace T2FBuild.Editor
                 OpenButtonLabel = "Open repo root",
                 OpenButtonRelPath = ".",
                 PostInstallNote =
-                    "CNB has no per-repo Secrets UI. One-time setup:\n" +
-                    "  1. Create a PRIVATE repo (e.g. https://cnb.cool/<your-org>/secrets) with envs.yml\n" +
-                    "     containing UNITY_LICENSE_BASE64, TENCENT_SECRET_ID/KEY, COS_BUCKET, COS_REGION.\n" +
-                    "  2. Edit the imports: URL inside .cnb.yml — replace REPLACE_ME_ORG.\n" +
-                    "  3. See the comment block at the top of .cnb.yml for full instructions.",
+                    "Edit the imports: URL inside .cnb.yml to point at your secrets file (default: same repo's envs.yml).\n" +
+                    "Configure envs.yml via Edit > Project Settings > T2FBuild > Secrets (writes UNITY_LICENSE_BASE64, TENCENT_SECRET_ID/KEY, COS_BUCKET, COS_REGION).",
             },
         };
 
         readonly List<WorkflowTemplate> _workflows = new List<WorkflowTemplate>();
 
         bool[] _workflowSelections = Array.Empty<bool>();
-
-        bool _copyTools = true;
 
         string _packageRoot;
 
@@ -69,7 +60,7 @@ namespace T2FBuild.Editor
         public static void Open()
         {
             var win = GetWindow<CITemplateInstallerWindow>("T2FBuild CI Installer");
-            win.minSize = new Vector2(540, 400);
+            win.minSize = new Vector2(540, 380);
         }
 
         void OnEnable()
@@ -142,8 +133,6 @@ namespace T2FBuild.Editor
 
             DrawWorkflowList();
             EditorGUILayout.Space();
-            DrawToolsToggle();
-            EditorGUILayout.Space();
             DrawApplyButton();
             EditorGUILayout.Space();
             DrawFooterButtons();
@@ -189,19 +178,6 @@ namespace T2FBuild.Editor
             EditorGUILayout.EndScrollView();
         }
 
-        void DrawToolsToggle()
-        {
-            var toolsExists = Directory.Exists(Path.Combine(_projectRoot, ProjectToolsRelativePath));
-            var statusText = toolsExists ? " (target exists, will overwrite)" : " (new)";
-
-            _copyTools = EditorGUILayout.ToggleLeft(
-                new GUIContent(
-                    $"Also copy tools/ (upload-cos.py, requirements.txt, README.md){statusText}",
-                    "Required by workflows that upload to Tencent COS. Shared across all CI platforms. " +
-                    "Commit the copied files so the CI runner can find them at <project>/tools/."),
-                _copyTools);
-        }
-
         void DrawApplyButton()
         {
             using (new EditorGUI.DisabledScope(!HasAnySelection()))
@@ -229,13 +205,6 @@ namespace T2FBuild.Editor
                         EditorUtility.RevealInFinder(openPath);
                     }
                 }
-                using (new EditorGUI.DisabledScope(!Directory.Exists(Path.Combine(_projectRoot, ProjectToolsRelativePath))))
-                {
-                    if (GUILayout.Button("Open tools/"))
-                    {
-                        EditorUtility.RevealInFinder(Path.Combine(_projectRoot, ProjectToolsRelativePath));
-                    }
-                }
             }
         }
 
@@ -245,7 +214,7 @@ namespace T2FBuild.Editor
             {
                 if (_workflowSelections[i]) return true;
             }
-            return _copyTools;
+            return false;
         }
 
         void Apply()
@@ -272,31 +241,6 @@ namespace T2FBuild.Editor
                 }
             }
 
-            if (_copyTools)
-            {
-                var src = Path.Combine(_packageRoot, PackageToolsRelativePath);
-                var dst = Path.Combine(_projectRoot, ProjectToolsRelativePath);
-                if (!Directory.Exists(src))
-                {
-                    failed++;
-                    summary.AppendLine($"✗ tools/: source '{PackageToolsRelativePath}' not found in package");
-                }
-                else
-                {
-                    try
-                    {
-                        CopyDirectoryRecursive(src, dst);
-                        copied++;
-                        summary.AppendLine($"✓ tools/ (from {PackageToolsRelativePath})");
-                    }
-                    catch (Exception e)
-                    {
-                        failed++;
-                        summary.AppendLine($"✗ tools/: {e.Message}");
-                    }
-                }
-            }
-
             var header = failed == 0
                 ? $"Installed {copied} item(s) successfully for {CurrentPlatform.DisplayName}."
                 : $"Installed {copied} item(s); {failed} failed. Target: {CurrentPlatform.DisplayName}.";
@@ -319,18 +263,6 @@ namespace T2FBuild.Editor
                 if (Platforms[i].Id == saved) return i;
             }
             return 0;
-        }
-
-        static void CopyDirectoryRecursive(string src, string dst)
-        {
-            EnsureDir(dst);
-            foreach (var path in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
-            {
-                var rel = Path.GetRelativePath(src, path);
-                var target = Path.Combine(dst, rel);
-                EnsureDir(Path.GetDirectoryName(target));
-                File.Copy(path, target, overwrite: true);
-            }
         }
 
         static void EnsureDir(string dir)

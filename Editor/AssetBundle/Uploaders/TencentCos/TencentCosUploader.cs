@@ -1,20 +1,16 @@
-using System.Diagnostics;
+using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using T2FBuild.Editor;
 using UnityEngine;
-using Debug = UnityEngine.Debug;
 
 namespace T2FBuild.Editor.Uploaders.TencentCos
 {
     [AssetBundleUploader("TencentCos")]
     public class TencentCosUploader : IAssetBundleUploader
     {
-        const string ScriptRelativePath = "CI/Templates~/tools/upload-cos.py";
-
-        const string ProjectToolsRelativePath = "tools/upload-cos.py";
-
         public string Name => "TencentCos";
 
         public Task<UploadResult> UploadAsync(UploadRequest req, CancellationToken ct)
@@ -22,139 +18,206 @@ namespace T2FBuild.Editor.Uploaders.TencentCos
             return Task.Run(() => UploadInternal(req, ct), ct);
         }
 
-        UploadResult UploadInternal(UploadRequest req, CancellationToken ct)
+        static UploadResult UploadInternal(UploadRequest req, CancellationToken ct)
         {
-            var scriptPath = LocateScript();
-            if (scriptPath == null)
+            var creds = ReadCredentials();
+            if (creds.Error != null)
             {
-                return new UploadResult
-                {
-                    Success = false,
-                    Error = $"upload-cos.py not found. Copy {ScriptRelativePath} from the T2FBuild package into <project>/{ProjectToolsRelativePath}, " +
-                            "or ensure the T2FBuild package is reachable on disk.",
-                };
+                return new UploadResult { Success = false, Error = creds.Error };
             }
 
-            var python = LocatePython();
-            if (python == null)
+            List<FileEntry> files;
+            string source;
+            try
             {
-                return new UploadResult
-                {
-                    Success = false,
-                    Error = "Python executable not found. Tried 'python', 'python3', 'py' on PATH. " +
-                            "Fix: install Python 3 (https://www.python.org/downloads/) AND restart Unity Hub so it picks up the updated PATH, " +
-                            "OR set Custom Python Path in Edit > Project Settings > T2FBuild > Upload to point at python.exe directly.",
-                };
+                files = ResolveFiles(req, out source);
+            }
+            catch (Exception e)
+            {
+                return new UploadResult { Success = false, Error = e.Message };
             }
 
-            var psi = new ProcessStartInfo
+            if (files.Count == 0)
             {
-                FileName = python,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                WorkingDirectory = Path.GetDirectoryName(scriptPath),
-            };
-            if (python == "py")
-            {
-                psi.ArgumentList.Add("-3");
-            }
-            psi.ArgumentList.Add(scriptPath);
-            psi.ArgumentList.Add(req.ManifestPath);
-
-            var argsForLog = python == "py" ? $"-3 \"{scriptPath}\" \"{req.ManifestPath}\"" : $"\"{scriptPath}\" \"{req.ManifestPath}\"";
-            Debug.Log($"[T2FBuild][TencentCos] $ {python} {argsForLog}");
-
-            using var process = Process.Start(psi);
-            if (process == null)
-            {
-                return new UploadResult { Success = false, Error = "Failed to start python process." };
+                Debug.Log($"[T2FBuild][TencentCos] Nothing to upload ({source}).");
+                return new UploadResult { Success = true, FilesUploaded = 0, TotalBytesUploaded = 0 };
             }
 
-            process.OutputDataReceived += (_, e) =>
-            {
-                if (e.Data != null) Debug.Log($"[T2FBuild][TencentCos] {e.Data}");
-            };
-            process.ErrorDataReceived += (_, e) =>
-            {
-                if (e.Data != null) Debug.LogWarning($"[T2FBuild][TencentCos] {e.Data}");
-            };
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
+            Debug.Log(
+                $"[T2FBuild][TencentCos] Uploading {files.Count} files → cos://{creds.Bucket}/ ({creds.Region}); source={source}");
 
-            while (!process.WaitForExit(500))
+            using var client = new TencentCosClient(creds.SecretId, creds.SecretKey, creds.Bucket, creds.Region);
+            var uploaded = 0;
+            var totalBytes = 0L;
+            var errors = new List<string>();
+
+            for (var i = 0; i < files.Count; i++)
             {
                 if (ct.IsCancellationRequested)
                 {
-                    try { process.Kill(); } catch { /* ignored */ }
                     return new UploadResult { Success = false, Error = "Cancelled" };
                 }
+
+                var f = files[i];
+                var (contentType, contentEncoding) = CosContentMetadata.Detect(f.RemoteKey);
+
+                try
+                {
+                    client.PutObjectAsync(f.RemoteKey, f.LocalPath, contentType, contentEncoding, ct).GetAwaiter().GetResult();
+                    uploaded++;
+                    totalBytes += f.Size;
+                    var enc = string.IsNullOrEmpty(contentEncoding) ? string.Empty : $" [enc={contentEncoding}]";
+                    Debug.Log($"[T2FBuild][TencentCos] [{i + 1}/{files.Count}] OK  {f.RemoteKey}{enc} ({f.Size} bytes)");
+                }
+                catch (Exception e)
+                {
+                    errors.Add($"{f.RemoteKey}: {e.Message}");
+                    Debug.LogWarning($"[T2FBuild][TencentCos] [{i + 1}/{files.Count}] FAIL {f.RemoteKey}: {e.Message}");
+                }
             }
-            process.WaitForExit();
+
+            if (errors.Count > 0)
+            {
+                return new UploadResult
+                {
+                    Success = false,
+                    Error = $"{errors.Count}/{files.Count} files failed; first error: {errors[0]}",
+                    FilesUploaded = uploaded,
+                    TotalBytesUploaded = totalBytes,
+                };
+            }
 
             return new UploadResult
             {
-                Success = process.ExitCode == 0,
-                Error = process.ExitCode != 0 ? $"upload-cos.py exited with code {process.ExitCode}" : null,
+                Success = true,
+                FilesUploaded = uploaded,
+                TotalBytesUploaded = totalBytes,
             };
         }
 
-        static string LocateScript()
+        static List<FileEntry> ResolveFiles(UploadRequest req, out string source)
         {
-            var projectRoot = Path.GetDirectoryName(Application.dataPath);
-            if (!string.IsNullOrEmpty(projectRoot))
+            if (!string.IsNullOrEmpty(req.ManifestPath) && File.Exists(req.ManifestPath))
             {
-                var projectTool = Path.Combine(projectRoot, ProjectToolsRelativePath);
-                if (File.Exists(projectTool)) return projectTool;
+                source = $"manifest {req.ManifestPath}";
+                return LoadFromManifest(req.ManifestPath);
             }
-
-            var packageRoot = T2FBuildPackagePath.ResolveRoot();
-            if (!string.IsNullOrEmpty(packageRoot))
+            if (!string.IsNullOrEmpty(req.LocalDirectory) && Directory.Exists(req.LocalDirectory))
             {
-                var pkgPath = Path.Combine(packageRoot, ScriptRelativePath);
-                if (File.Exists(pkgPath)) return pkgPath;
+                if (string.IsNullOrEmpty(req.RemotePrefix))
+                {
+                    throw new InvalidOperationException(
+                        "[T2FBuild] UploadRequest.RemotePrefix is required when using LocalDirectory (no manifest).");
+                }
+                source = $"directory {req.LocalDirectory}";
+                return LoadFromDirectory(req.LocalDirectory, req.RemotePrefix);
             }
-
-            return null;
+            throw new InvalidOperationException(
+                "[T2FBuild] UploadRequest must specify either a valid ManifestPath or LocalDirectory + RemotePrefix.");
         }
 
-        static string LocatePython()
+        static List<FileEntry> LoadFromManifest(string manifestPath)
         {
-            var custom = T2FBuildSettings.instance?.customPythonPath;
-            if (!string.IsNullOrEmpty(custom))
+            var json = File.ReadAllText(manifestPath);
+            var manifest = JsonUtility.FromJson<UploadManifest>(json);
+            if (manifest == null)
             {
-                if (File.Exists(custom)) return custom;
-                Debug.LogWarning($"[T2FBuild][TencentCos] customPythonPath '{custom}' does not exist; falling back to PATH lookup.");
+                throw new InvalidOperationException($"[T2FBuild] Failed to parse manifest {manifestPath}.");
             }
+            var local = manifest.localDirectory ?? string.Empty;
+            var remotePrefix = NormalizePrefix(manifest.remotePrefix);
+            var files = new List<FileEntry>(manifest.files?.Count ?? 0);
+            if (manifest.files == null) return files;
+            foreach (var f in manifest.files)
+            {
+                if (string.IsNullOrEmpty(f.relativePath)) continue;
+                var rel = f.relativePath.Replace('\\', '/');
+                var localPath = Path.Combine(local, rel);
+                files.Add(new FileEntry
+                {
+                    LocalPath = localPath,
+                    RemoteKey = remotePrefix + rel,
+                    Size = f.size,
+                });
+            }
+            return files;
+        }
 
-            foreach (var name in new[] { "python", "python3", "py" })
+        static List<FileEntry> LoadFromDirectory(string localDir, string remotePrefix)
+        {
+            var basePath = Path.GetFullPath(localDir);
+            var prefix = NormalizePrefix(remotePrefix);
+            var files = new List<FileEntry>();
+            foreach (var full in Directory.EnumerateFiles(basePath, "*", SearchOption.AllDirectories))
             {
-                try
+                var rel = Path.GetRelativePath(basePath, full).Replace('\\', '/');
+                files.Add(new FileEntry
                 {
-                    using var test = Process.Start(new ProcessStartInfo
-                    {
-                        FileName = name,
-                        Arguments = name == "py" ? "-3 --version" : "--version",
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        CreateNoWindow = true,
-                    });
-                    if (test == null) continue;
-                    if (!test.WaitForExit(2000))
-                    {
-                        try { test.Kill(); } catch { /* ignored */ }
-                        continue;
-                    }
-                    if (test.ExitCode == 0) return name;
-                }
-                catch
-                {
-                    // try next
-                }
+                    LocalPath = full,
+                    RemoteKey = prefix + rel,
+                    Size = new FileInfo(full).Length,
+                });
             }
-            return null;
+            return files;
+        }
+
+        static string NormalizePrefix(string prefix)
+        {
+            if (string.IsNullOrEmpty(prefix)) return string.Empty;
+            return prefix.EndsWith("/") ? prefix : prefix + "/";
+        }
+
+        static Credentials ReadCredentials()
+        {
+            var sid = Env("TENCENT_SECRET_ID");
+            var sk = Env("TENCENT_SECRET_KEY");
+            var bucket = Env("COS_BUCKET");
+            var region = Env("COS_REGION");
+
+            var missing = new List<string>();
+            if (string.IsNullOrEmpty(sid)) missing.Add("TENCENT_SECRET_ID");
+            if (string.IsNullOrEmpty(sk)) missing.Add("TENCENT_SECRET_KEY");
+            if (string.IsNullOrEmpty(bucket)) missing.Add("COS_BUCKET");
+            if (string.IsNullOrEmpty(region)) missing.Add("COS_REGION");
+            if (missing.Count > 0)
+            {
+                return new Credentials
+                {
+                    Error =
+                        $"Missing env vars: {string.Join(", ", missing)}. " +
+                        "Fill them in Edit > Project Settings > T2FBuild > Secrets (Bucket/Region from Tencent COS section). " +
+                        "BuildWindow auto-injects envs.yml on build; shell env vars also work as fallback.",
+                };
+            }
+            return new Credentials { SecretId = sid, SecretKey = sk, Bucket = bucket, Region = region };
+        }
+
+        static string Env(string key)
+        {
+            var v = Environment.GetEnvironmentVariable(key);
+            return string.IsNullOrEmpty(v) ? null : v;
+        }
+
+        class FileEntry
+        {
+            public string LocalPath;
+
+            public string RemoteKey;
+
+            public long Size;
+        }
+
+        class Credentials
+        {
+            public string SecretId;
+
+            public string SecretKey;
+
+            public string Bucket;
+
+            public string Region;
+
+            public string Error;
         }
     }
 }

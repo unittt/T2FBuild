@@ -86,12 +86,6 @@ namespace T2FBuild.Editor
                 new GUIContent("Enabled By Default",
                     "Fallback for UploadAssetBundleStep when the T2FBUILD_UPLOAD_ENABLED env var is unset. CI workflows should set the env var explicitly; this toggle is for local dev convenience."),
                 settings.uploadEnabledByDefault);
-            settings.customPythonPath = EditorGUILayout.TextField(
-                new GUIContent("Custom Python Path",
-                    "Optional absolute path to python.exe (e.g. C:\\Python311\\python.exe). " +
-                    "Leave empty to auto-detect from PATH (tries 'python', 'python3', 'py' on Windows). " +
-                    "Used by TencentCosUploader to run upload-cos.py."),
-                settings.customPythonPath);
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Tencent COS", EditorStyles.boldLabel);

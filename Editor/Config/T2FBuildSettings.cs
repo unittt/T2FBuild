@@ -21,8 +21,6 @@ namespace T2FBuild.Editor
 
         public bool uploadEnabledByDefault;
 
-        public string customPythonPath = "";
-
         [Header("Tencent COS")]
         public string tencentCosBucket = "";
 

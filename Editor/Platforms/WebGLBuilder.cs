@@ -17,6 +17,7 @@ namespace T2FBuild.Editor
                 new GenerateUploadManifestStep(settings.abRemotePrefixTemplate),
                 new UploadAssetBundleStep(settings.defaultUploader),
                 new BuildPlayerStep(),
+                new UploadPlayerStep(settings.defaultUploader, settings.playerRemotePrefixTemplate),
             };
         }
     }

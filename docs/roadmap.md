@@ -13,11 +13,11 @@
 |---|------|----------|--------|
 | 1 | 包骨架 + Core 抽象 | `BuildContext` / `IBuildStep` / `BuildRunner` / `BuildEntry` + `PlatformBuilderRegistry`（反射注册） | `3579946` |
 | 2 | WebGL + AB 抽象 + Addressables | `IAssetBundleProvider`, `WebGLBuilder`, `AddressablesProvider`（versionDefines 隔离） | `a717fa4` |
-| 3 | 上传抽象 + Tencent COS | `IAssetBundleUploader`, `UploadManifest`, `TencentCosUploader`（Python 壳），`upload-cos.py` + `RegistryScanner` 抽取 | `9f8483a` |
+| 3 | 上传抽象 + Tencent COS | `IAssetBundleUploader`, `UploadManifest`, `TencentCosUploader`（原生 .NET V5 签名 + HTTP PUT，零外部依赖）+ `RegistryScanner` 抽取 | `9f8483a` (+ native rewrite) |
 | 4 | GitHub Actions webgl.yml | 完整 CI 链路 + Player 直传 COS 静态托管（`--dir` 模式 + Content-Type/Encoding） | `55ed497` |
 | 6 | **WeChat 小游戏** | `WeChatBuilder`（profile=wechat，versionDefines 隔离）+ `ConfigureWeChatProjectStep` / `RunWeChatExportStep`（一行调 `WXConvertCore.DoExport`）/ `UploadWeChatFirstPackageStep`（首包数据→COS 复用 manifest 协议）+ `wechat.yml`（Node + AB/首包双 manifest 上传 + minigame artifact） | pending |
 | – | **多 CI 平台支持（GitHub + CNB）** | `CI/Templates~/` 按 `github/` / `cnb/` 分目录；`CITemplateInstallerWindow` 顶部新增 CI Platform 下拉 + 选择持久化到 EditorPrefs + per-platform target 路径策略；CNB `cnb.yml` 单文件含 webgl/wechat 双触发 + ULF base64 license 激活 + Library `copy-on-write` 缓存；secrets 走 `imports:` 私有 repo | pending |
-| – | 编辑器辅助 — CI 模板安装器 | `CITemplateInstallerWindow`（CI 平台下拉 + 多选 + 自动连带 `tools/`） | `3a53391` |
+| – | 编辑器辅助 — CI 模板安装器 | `CITemplateInstallerWindow`（CI 平台下拉 + 多选） | `3a53391` |
 | – | 编辑器辅助 — 配置单例 | `T2FBuildSettings` + Project Settings UI（注册表驱动下拉框） | `c1bc7cd` |
 
 设计文档对应章节：§4（结构）、§5（抽象）、§7（CI，含 GitHub + CNB 对比）、§8（平台）。
@@ -111,6 +111,7 @@ GitHub Actions、CNB 已落地（见已完成表）。可按需追加：
 
 - `GenerateUploadManifestStep` 使用 `Path.GetRelativePath`（.NET Standard 2.1），Unity 2022.3 OK，若兼容更老版本需替换
 - `IAssetBundleUploader.UploadAsync` 返回 Task，目前 step 端 `.GetAwaiter().GetResult()` 阻塞 — 后续若引入 `IAsyncBuildStep`，整条流水线可异步化
-- `upload-cos.py` `--dir` 模式不计算 SHA256（速度优先），增量上传需要时再补
+- `TencentCosUploader` directory 模式不计算 SHA256（速度优先），增量上传需要时再补
+- `TencentCosClient` 只实现 PUT-object，没有 multipart upload，单文件 >5GB 会失败（COS 单 PUT 上限）；游戏资源场景几乎不可能命中
 - CNB pipeline 模板未做端到端验证：`unity-editor` 命令名、Library 缓存挂载路径（`/workspace/Library` 假设可能不准）、`-manualLicenseFile` 是否需要额外的 `-serial` 配合等，要在 BounceBlast 真跑一次 CNB pipeline 才能确认
 - 三个反射注册器（`PlatformBuilder` / `AssetBundleProvider` / `AssetBundleUploader`）现已通过 `RegistryScanner` 抽取共用扫描；若再加第四个，考虑泛型 `NamedRegistry<TInterface, TAttribute>` 进一步压缩
