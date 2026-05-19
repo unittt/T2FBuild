@@ -1,4 +1,4 @@
-# Copied from the T2FBuild package: CI/Templates~/workflows/wechat.yml
+# Copied from the T2FBuild package: CI/Templates~/github/workflows/wechat.yml
 # Source: https://github.com/unittt/T2FBuild
 #
 # === Required GitHub Secrets ===
@@ -7,6 +7,11 @@
 #   TENCENT_SECRET_KEY   Tencent Cloud API SecretKey
 #   COS_BUCKET           Bucket name (e.g. mybucket-1234567890)
 #   COS_REGION           Bucket region (e.g. ap-shanghai)
+#
+# Note: Multi-project tenancy (multiple games sharing one COS bucket) is handled
+# entirely by T2FBuildSettings.projectId, which gets baked into the upload manifest
+# on the Unity side. No BUILD_PROJECT env var is needed for wechat.yml because
+# all uploads here are manifest-driven.
 #
 # === Required project setup ===
 #   - T2FBuild package referenced in Packages/manifest.json (git URL).

@@ -79,6 +79,9 @@ $:
         BUILD_NUMBER: ${CNB_BUILD_ID}
         BUILD_ENV: ${ENV:-dev}
         UPLOAD: ${UPLOAD:-false}
+        # Project namespace for COS paths when one bucket hosts multiple projects.
+        # Must match T2FBuildSettings.projectId. Leave empty for single-project bucket.
+        BUILD_PROJECT: ''
       stages:
         - name: activate-unity-license
           script: |
@@ -105,7 +108,7 @@ $:
             if [ "$UPLOAD" != "true" ]; then echo "UPLOAD=false, skipping"; exit 0; fi
             python tools/upload-cos.py \
               --dir Build/WebGL/Player \
-              --remote-prefix "webgl/${BUILD_ENV}/${BUILD_VERSION}/"
+              --remote-prefix "${BUILD_PROJECT:+${BUILD_PROJECT}/}webgl/${BUILD_ENV}/${BUILD_VERSION}/"
 
 # ---------- Manual trigger: WeChat MiniGame ----------
   web_trigger_wechat:
@@ -174,6 +177,9 @@ $:
         BUILD_VERSION: ${CNB_BRANCH#v}   # strip the leading "v"
         BUILD_NUMBER: ${CNB_BUILD_ID}
         BUILD_ENV: prod
+        # Project namespace for COS paths when one bucket hosts multiple projects.
+        # Must match T2FBuildSettings.projectId. Leave empty for single-project bucket.
+        BUILD_PROJECT: ''
       stages:
         - name: activate-unity-license
           script: |
@@ -199,7 +205,7 @@ $:
             set -e
             python tools/upload-cos.py \
               --dir Build/WebGL/Player \
-              --remote-prefix "webgl/prod/${BUILD_VERSION}/"
+              --remote-prefix "${BUILD_PROJECT:+${BUILD_PROJECT}/}webgl/prod/${BUILD_VERSION}/"
 
 # ---------- Tag-based: WeChat MiniGame prod release ----------
 "wx-v*":

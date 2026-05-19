@@ -31,6 +31,15 @@ namespace T2FBuild.Editor
             var settings = T2FBuildSettings.instance;
             EditorGUI.BeginChangeCheck();
 
+            EditorGUILayout.LabelField("Project", EditorStyles.boldLabel);
+            settings.projectId = EditorGUILayout.TextField(
+                new GUIContent("Project ID",
+                    "Optional namespace prefix for COS remote paths when a single bucket hosts multiple projects. " +
+                    "Replaces {project} token in all remote prefix templates below. " +
+                    "Leave empty for single-project buckets. Example: 'bounceblast' → 'bounceblast/ab/WebGL/dev/0.0.1/'."),
+                settings.projectId);
+
+            EditorGUILayout.Space();
             EditorGUILayout.LabelField("Asset Bundle", EditorStyles.boldLabel);
             settings.assetBundleProvider = DrawNamedRegistryDropdown(
                 new GUIContent("Provider",
@@ -40,7 +49,9 @@ namespace T2FBuild.Editor
                 "No IAssetBundleProvider found. Install a provider package (e.g. com.unity.addressables) for it to appear.");
             settings.abRemotePrefixTemplate = EditorGUILayout.TextField(
                 new GUIContent("Remote Prefix Template",
-                    "Used by GenerateUploadManifestStep. Tokens: {target} {profile} {env} {version}."),
+                    "Used by GenerateUploadManifestStep. Tokens: {project} {target} {profile} {profileSuffix} {env} {version}. " +
+                    "{project}/ resolves to empty when Project ID is empty. {profileSuffix} resolves to '_<profile>' or empty " +
+                    "— use it to namespace multi-profile builds (e.g. WebGL vs WebGL+wechat) without forcing an extra path segment when profile is empty."),
                 settings.abRemotePrefixTemplate);
 
             EditorGUILayout.Space();
@@ -53,12 +64,24 @@ namespace T2FBuild.Editor
                 "No IAssetBundleUploader found.");
             settings.playerRemotePrefixTemplate = EditorGUILayout.TextField(
                 new GUIContent("Player Remote Prefix",
-                    "Used when uploading the WebGL Player as a static site to COS. Tokens: {env} {version}. Referenced from the CI workflow yml."),
+                    "Used when uploading the WebGL Player as a static site to COS. Tokens: {project} {env} {version}. " +
+                    "Referenced from the CI workflow yml via $BUILD_PROJECT etc.; keep the template here aligned with the yml."),
                 settings.playerRemotePrefixTemplate);
             settings.uploadEnabledByDefault = EditorGUILayout.Toggle(
                 new GUIContent("Enabled By Default",
                     "Fallback for UploadAssetBundleStep when the T2FBUILD_UPLOAD_ENABLED env var is unset. CI workflows should set the env var explicitly; this toggle is for local dev convenience."),
                 settings.uploadEnabledByDefault);
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Tencent COS", EditorStyles.boldLabel);
+            settings.tencentCosBucket = EditorGUILayout.TextField(
+                new GUIContent("Bucket",
+                    "COS bucket name (public identifier, not a secret). Used as a hint by CI Secrets Editor to pre-fill envs.yml COS_BUCKET, and as fallback to derive the WeChat CDN URL when WeChat MiniGame > CDN Base URL is empty."),
+                settings.tencentCosBucket);
+            settings.tencentCosRegion = EditorGUILayout.TextField(
+                new GUIContent("Region",
+                    "COS bucket region (e.g. ap-shanghai). Public identifier, not a secret. Combined with Bucket above when deriving the COS endpoint URL."),
+                settings.tencentCosRegion);
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("WeChat MiniGame", EditorStyles.boldLabel);
@@ -68,7 +91,7 @@ namespace T2FBuild.Editor
                 settings.wechatAppId);
             settings.wechatCdnBaseUrl = EditorGUILayout.TextField(
                 new GUIContent("CDN Base URL",
-                    "Full CDN/COS URL where first-package data files will be served from (e.g. https://mybucket-123.cos.ap-shanghai.myqcloud.com/). Combined with First Package Remote Prefix to produce the full CDN URL written into MiniGameConfig.CDN."),
+                    "Optional override for the runtime CDN URL written into MiniGameConfig.CDN (e.g. https://cdn.example.com/). Leave empty to auto-derive from Tencent COS Bucket+Region above (direct COS hosting). Fill only when serving WeChat first-package data through a CDN that fronts COS."),
                 settings.wechatCdnBaseUrl);
             settings.wechatCustomNodePath = EditorGUILayout.TextField(
                 new GUIContent("Custom Node Path",
@@ -80,7 +103,7 @@ namespace T2FBuild.Editor
                 settings.wechatFirstPackageGlob);
             settings.wechatFirstPackageRemotePrefixTemplate = EditorGUILayout.TextField(
                 new GUIContent("First Package Remote Prefix",
-                    "COS key prefix for the first-package data files. Tokens: {env} {version} {profile} {target}. The same prefix is written into MiniGameConfig.CDN so the runtime fetches them from CDN."),
+                    "COS key prefix for the first-package data files. Tokens: {project} {env} {version} {profile} {target}. The same prefix is written into MiniGameConfig.CDN so the runtime fetches them from CDN."),
                 settings.wechatFirstPackageRemotePrefixTemplate);
             settings.wechatMainPackageSizeLimitMB = EditorGUILayout.IntField(
                 new GUIContent("Main Package Size Limit (MB)",

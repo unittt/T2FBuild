@@ -1,4 +1,4 @@
-# Copied from the T2FBuild package: CI/Templates~/workflows/webgl.yml
+# Copied from the T2FBuild package: CI/Templates~/github/workflows/webgl.yml
 # Source: https://github.com/unittt/T2FBuild
 #
 # === Required GitHub Secrets ===
@@ -7,6 +7,11 @@
 #   TENCENT_SECRET_KEY   Tencent Cloud API SecretKey
 #   COS_BUCKET           Bucket name (e.g. mybucket-1234567890)
 #   COS_REGION           Bucket region (e.g. ap-shanghai)
+#
+# === Optional repo Variables (Settings > Secrets and variables > Actions > Variables) ===
+#   BUILD_PROJECT        Project namespace for COS paths when a single bucket hosts
+#                        multiple projects. Should match T2FBuildSettings.projectId.
+#                        Leave unset for single-project buckets.
 #
 # === Required project setup ===
 #   - T2FBuild package referenced in Packages/manifest.json (git URL).
@@ -123,15 +128,16 @@ jobs:
 
       - name: Upload WebGL Player to Tencent COS
         if: steps.params.outputs.upload == 'true'
-        run: |
-          python tools/upload-cos.py \
-            --dir Build/WebGL/Player \
-            --remote-prefix "webgl/${{ steps.params.outputs.env }}/${{ steps.params.outputs.version }}/"
         env:
           TENCENT_SECRET_ID:  ${{ secrets.TENCENT_SECRET_ID }}
           TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
           COS_BUCKET:         ${{ secrets.COS_BUCKET }}
           COS_REGION:         ${{ secrets.COS_REGION }}
+          BUILD_PROJECT:      ${{ vars.BUILD_PROJECT }}
+        run: |
+          python tools/upload-cos.py \
+            --dir Build/WebGL/Player \
+            --remote-prefix "${BUILD_PROJECT:+${BUILD_PROJECT}/}webgl/${{ steps.params.outputs.env }}/${{ steps.params.outputs.version }}/"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -153,6 +159,8 @@ jobs:
             echo "| Env     | \`${{ steps.params.outputs.env }}\` |"
             echo "| Upload  | \`${{ steps.params.outputs.upload }}\` |"
             if [ "${{ steps.params.outputs.upload }}" = "true" ]; then
-              echo "| WebGL URL | https://${{ secrets.COS_BUCKET }}.cos.${{ secrets.COS_REGION }}.myqcloud.com/webgl/${{ steps.params.outputs.env }}/${{ steps.params.outputs.version }}/index.html |"
+              PROJECT_SEGMENT=""
+              [ -n "${{ vars.BUILD_PROJECT }}" ] && PROJECT_SEGMENT="${{ vars.BUILD_PROJECT }}/"
+              echo "| WebGL URL | https://${{ secrets.COS_BUCKET }}.cos.${{ secrets.COS_REGION }}.myqcloud.com/${PROJECT_SEGMENT}webgl/${{ steps.params.outputs.env }}/${{ steps.params.outputs.version }}/index.html |"
             fi
           } >> "$GITHUB_STEP_SUMMARY"

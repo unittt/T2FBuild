@@ -27,7 +27,9 @@ macOS:    /Library/Application Support/Unity/Unity_lic.ulf
 Linux:    /var/lib/unity/Unity_lic.ulf
 ```
 
-**直接 base64 编码现成文件**，不需要走 `.alf` 流程：
+> 推荐使用 §3 Option B 介绍的 **CI Secrets Editor**（`Window > T2FBuild > CI Secrets Editor`）一次性填完 `.ulf` 编码 + 4 个 COS 字段——把当前 §1/§2 + §3 Option B 几步合一。本节作为命令行兜底方式保留。
+
+### 命令行方式
 
 ```bash
 # Git Bash / WSL
@@ -101,6 +103,20 @@ env:
 
 适用：单人 / 小团队，所有有代码读权限的人也该看 secrets。
 
+#### 用 CI Secrets Editor 自动填写（推荐）
+
+打开 `Window > T2FBuild > CI Secrets Editor`，一个窗口完成 envs.yml 全部 5 个字段：
+
+- **envs.yml 路径**：启动时自动定位仓库根 `envs.yml`，可改路径；点 **Reload** 反向解析已有值预填回 5 个字段（已填的字段不会丢，可见已存在状态后**只改要改的**）
+- **Unity License**：`.ulf` 自动检测路径（Windows/macOS/Linux），编码后 base64 长度直接显示；可手动 Browse 或 Auto-Detect 重置
+- **Tencent COS**：4 个字段独立编辑；Secret Key 走密码字段掩码；Bucket / Region 自动从 `Project Settings > T2FBuild > Tencent COS` 取值作为 hint，按「Use ...」按钮一键填入
+- **写入策略**：单按钮 **Write All to envs.yml** 一次性更新 5 个字段，**保留 envs.yml 里 5 个标准字段之外的所有自定义 key 和注释**（行级合并，不重写整个文件）
+
+**安全约束**：
+- 表单值只活在窗口内存里，关窗即丢——绝不写 EditorPrefs / ScriptableObject
+- Secret Key 字段掩码显示但可以被 `Ctrl+C` 复制（YAML 源文件本来就在仓库内可读，掩码主要防肩窥）
+- 不调用任何外部 API（无连接测试、无凭据校验），凭据仅本地读写
+
 ### Option C —— 独立私有 secrets repo（团队场景）
 
 另建私有仓库 `https://cnb.cool/<your-org>/secrets`，`envs.yml` 内容同上。`.cnb.yml`：
@@ -116,12 +132,35 @@ x-imports: &imports
 
 ## 4. 配置 T2FBuildSettings
 
-Unity → `Edit > Project Settings > T2FBuild > WeChat MiniGame`：
+Unity → `Edit > Project Settings > T2FBuild`：
+
+### Project
+
+| 字段 | 值 | 备注 |
+|---|---|---|
+| Project ID | `bounceblast`（或空） | 多项目共用一个 COS bucket 时填——COS key 会以 `<projectId>/` 开头隔离各项目；单项目 bucket 留空 |
+
+填了 Project ID 后，AB / Player / WeChat 首包路径都会自动加前缀。例：`bounceblast/ab/WebGL/dev/0.0.1/<file>`、`bounceblast/webgl/dev/0.0.1/index.html`。
+
+如果 CI 端需要（Player 上传走 `--dir` 模式），还要在 CI 配置里同步设置 `BUILD_PROJECT`：
+- GitHub Actions：Settings > Secrets and variables > Actions > Variables 加一条 `BUILD_PROJECT=bounceblast`
+- CNB：`.cnb.yml` 里 `web_trigger_webgl` / 标签 webgl 两个 pipeline 的 `env:` 块改 `BUILD_PROJECT: 'bounceblast'`
+
+### Tencent COS
+
+| 字段 | 值 | 备注 |
+|---|---|---|
+| Bucket | `bounceblast-1234567890` | 与 §2 COS Bucket 对应；公开标识符，非密钥 |
+| Region | `ap-shanghai` | 公开标识符 |
+
+这两个字段供 CI Secrets Editor 作为 envs.yml 字段的 hint，同时在「WeChat MiniGame > CDN Base URL」为空时**自动派生**运行时 CDN URL：`https://<Bucket>.cos.<Region>.myqcloud.com/`。
+
+### WeChat MiniGame
 
 | 字段 | 值 | 备注 |
 |---|---|---|
 | AppId | `wxXXXXXXXXXXXXXXXX` | 微信公众平台 → 小游戏 → 开发设置 |
-| CDN Base URL | `https://<bucket>.cos.<region>.myqcloud.com/` | 与 §2 COS Bucket 对应；尾部带 `/` |
+| CDN Base URL | 空 / 或 `https://cdn.example.com/` | **空** = 自动用上方 Bucket+Region 派生（直连 COS 静态托管）；填 = 自定义 CDN 域名（运行时从这个 URL 取首包数据） |
 | Custom Node Path | 留空 | CNB 容器走系统 PATH |
 | First Package Glob | `webgl.data*` | 默认值，Unity 2022 命名约定 |
 | First Package Remote Prefix | `wechat/{env}/{version}/data/` | 默认值；token 自动替换 |

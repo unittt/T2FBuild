@@ -72,9 +72,18 @@ namespace T2FBuild.Editor
 
         static string ResolveRemotePrefix(string template, BuildContext ctx, string version)
         {
+            var settings = T2FBuildSettings.instance;
+            var projectId = settings != null ? settings.projectId ?? string.Empty : string.Empty;
+            var projectWithSlash = string.IsNullOrEmpty(projectId) ? string.Empty : projectId + "/";
+            var profile = ctx.Profile ?? string.Empty;
+            var profileSuffix = string.IsNullOrEmpty(profile) ? string.Empty : "_" + profile;
+
             return template
+                .Replace("{project}/", projectWithSlash)
+                .Replace("{project}", projectId)
                 .Replace("{target}", ctx.Target.ToString())
-                .Replace("{profile}", ctx.Profile ?? string.Empty)
+                .Replace("{profileSuffix}", profileSuffix)
+                .Replace("{profile}", profile)
                 .Replace("{env}", ctx.Env)
                 .Replace("{version}", version);
         }
