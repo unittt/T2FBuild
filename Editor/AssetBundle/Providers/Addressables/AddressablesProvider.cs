@@ -1,6 +1,8 @@
+using System.IO;
 using UnityEditor.AddressableAssets;
 using UnityEditor.AddressableAssets.Build;
 using UnityEditor.AddressableAssets.Settings;
+using UnityEngine;
 
 namespace T2FBuild.Editor.Providers
 {
@@ -27,13 +29,31 @@ namespace T2FBuild.Editor.Providers
                 ? settings.OverridePlayerVersion
                 : ctx.Version;
 
+            var outputDir = ResolveOutputDirectory(result.OutputPath);
+            if (!string.IsNullOrEmpty(outputDir))
+            {
+                Debug.Log($"[T2FBuild][Addressables] Resolved AB output directory: {outputDir} (raw OutputPath={result.OutputPath})");
+            }
+
             return new AssetBundleBuildResult
             {
                 Success = string.IsNullOrEmpty(result.Error),
                 Error = result.Error,
-                OutputDirectory = result.OutputPath,
+                OutputDirectory = outputDir,
                 Version = version,
             };
+        }
+
+        static string ResolveOutputDirectory(string outputPath)
+        {
+            if (string.IsNullOrEmpty(outputPath)) return outputPath;
+            if (Directory.Exists(outputPath)) return outputPath;
+            if (File.Exists(outputPath))
+            {
+                // Addressables 1.20+ returns the path to settings.json instead of the directory.
+                return Path.GetDirectoryName(outputPath);
+            }
+            return outputPath;
         }
     }
 }
