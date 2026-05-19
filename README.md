@@ -5,10 +5,10 @@ Unity 自动化打包框架。
 ## 特性
 
 - **多平台支持**：Android、iOS、WebGL、微信小游戏
-- **CI 集成**：GitHub Actions（基于 [GameCI](https://game.ci)）
+- **CI 集成**：GitHub Actions（基于 [GameCI](https://game.ci)）、CNB（[cnb.cool](https://cnb.cool)）
 - **AB 系统抽象**：Addressables（首期），YooAsset（后期）
 - **上传层抽象**：腾讯云 COS（首期），可扩展其他对象存储
-- **可插拔扩展**：特性 + 反射注册，新增 Provider 不修改框架核心
+- **可插拔扩展**：特性 + 反射注册，新增 Provider / CI 平台不修改框架核心
 
 ## Unity 版本
 

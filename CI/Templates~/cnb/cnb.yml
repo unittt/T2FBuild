@@ -1,0 +1,251 @@
+# Copied from the T2FBuild package: CI/Templates~/cnb/cnb.yml
+# Source: https://github.com/unittt/T2FBuild
+#
+# CNB pipeline file. CNB only reads a single .cnb.yml at the repository root,
+# so this file declares ALL build workflows behind separate triggers.
+#
+# === Triggers ===
+#
+#   Manual (via the "Run" button in the CNB web UI):
+#     - web_trigger_webgl:   build WebGL; provide VERSION / ENV / UPLOAD env vars
+#     - web_trigger_wechat:  build WeChat MiniGame; same inputs
+#
+#   Tag-based (auto):
+#     - tag v*    (e.g. v0.1.0)    => prod WebGL build + upload
+#     - tag wx-v* (e.g. wx-v0.1.0) => prod WeChat MiniGame build + upload
+#
+# === Secrets setup (one-time, per project) ===
+#
+# CNB has no per-repo Secrets UI. Create a separate PRIVATE repo on CNB
+# (e.g. `https://cnb.cool/REPLACE_ME_ORG/secrets`) and commit an envs.yml
+# with the following keys, then update the `imports:` URL below.
+#
+#   UNITY_LICENSE_BASE64    base64-encoded contents of Unity_v2022.x.ulf (Personal license)
+#   TENCENT_SECRET_ID       Tencent Cloud API SecretId
+#   TENCENT_SECRET_KEY      Tencent Cloud API SecretKey
+#   COS_BUCKET              Bucket name (e.g. mybucket-1234567890)
+#   COS_REGION              Bucket region (e.g. ap-shanghai)
+#
+# To obtain Unity_v2022.x.ulf:
+#   1. unity-editor -batchmode -createManualActivationFile -logFile -
+#   2. Upload the produced Unity_v2022.x.alf at https://license.unity3d.com/manual
+#   3. Download Unity_v2022.x.ulf, then `base64 -w0 Unity_v2022.x.ulf` and store the value.
+#
+# envs.yml example (commit to the secrets repo, NOT to this repo):
+#
+#   env:
+#     UNITY_LICENSE_BASE64: |
+#       PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgi...
+#     TENCENT_SECRET_ID: AKID...
+#     TENCENT_SECRET_KEY: ...
+#     COS_BUCKET: mybucket-1234567890
+#     COS_REGION: ap-shanghai
+#
+# === Required project setup ===
+#
+#   - T2FBuild package referenced in Packages/manifest.json (git URL).
+#   - tools/upload-cos.py and tools/requirements.txt copied from this package
+#     (CI/Templates~/tools/) into your project root. Commit them so the
+#     pipeline can find them at /workspace/<repo>/tools/.
+#   - For WeChat: com.qq.weixin.minigame package installed AND
+#     Project Settings > T2FBuild > WeChat MiniGame > AppId filled in.
+#
+
+# ---------- Shared anchors ----------
+# YAML anchors share the docker + import blocks across all pipelines so we
+# only declare the image / volumes / secrets reference once.
+
+x-docker: &docker-unity-webgl
+  image: unityci/editor:2022.3.14f1-webgl-3
+  volumes:
+    - /workspace/Library:copy-on-write
+    - /workspace/Library_wechat:copy-on-write
+    - /root/.cache/pip:copy-on-write
+
+x-imports: &imports
+  - https://cnb.cool/REPLACE_ME_ORG/secrets/-/blob/main/envs.yml
+
+# ---------- Manual trigger: WebGL ----------
+$:
+  web_trigger_webgl:
+    - name: build-webgl-manual
+      runner:
+        cpus: 8
+      docker: *docker-unity-webgl
+      imports: *imports
+      env:
+        T2FBUILD_UPLOAD_ENABLED: 'false'
+        BUILD_VERSION: ${VERSION:-0.0.${CNB_BUILD_ID}}
+        BUILD_NUMBER: ${CNB_BUILD_ID}
+        BUILD_ENV: ${ENV:-dev}
+        UPLOAD: ${UPLOAD:-false}
+      stages:
+        - name: activate-unity-license
+          script: |
+            set -e
+            echo "$UNITY_LICENSE_BASE64" | base64 -d > /tmp/Unity.ulf
+            unity-editor -batchmode -nographics -logFile - \
+              -manualLicenseFile /tmp/Unity.ulf -quit || true
+        - name: build-webgl
+          script: |
+            set -e
+            unity-editor -batchmode -nographics -logFile - \
+              -projectPath "$PWD" \
+              -buildTarget WebGL \
+              -executeMethod T2FBuild.Editor.BuildEntry.BuildWebGL \
+              -quit
+        - name: upload-asset-bundles
+          script: |
+            if [ "$UPLOAD" != "true" ]; then echo "UPLOAD=false, skipping"; exit 0; fi
+            if [ ! -f Build/WebGL/upload-manifest.json ]; then echo "No AB manifest"; exit 0; fi
+            pip install -r tools/requirements.txt
+            python tools/upload-cos.py --manifest Build/WebGL/upload-manifest.json
+        - name: upload-webgl-player
+          script: |
+            if [ "$UPLOAD" != "true" ]; then echo "UPLOAD=false, skipping"; exit 0; fi
+            python tools/upload-cos.py \
+              --dir Build/WebGL/Player \
+              --remote-prefix "webgl/${BUILD_ENV}/${BUILD_VERSION}/"
+
+# ---------- Manual trigger: WeChat MiniGame ----------
+  web_trigger_wechat:
+    - name: build-wechat-manual
+      runner:
+        cpus: 8
+      docker: *docker-unity-webgl
+      imports: *imports
+      env:
+        T2FBUILD_UPLOAD_ENABLED: 'false'
+        BUILD_VERSION: ${VERSION:-0.0.${CNB_BUILD_ID}}
+        BUILD_NUMBER: ${CNB_BUILD_ID}
+        BUILD_ENV: ${ENV:-dev}
+        UPLOAD: ${UPLOAD:-false}
+      stages:
+        - name: install-node
+          script: |
+            set -e
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+            apt-get install -y nodejs
+            node --version
+        - name: activate-unity-license
+          script: |
+            set -e
+            echo "$UNITY_LICENSE_BASE64" | base64 -d > /tmp/Unity.ulf
+            unity-editor -batchmode -nographics -logFile - \
+              -manualLicenseFile /tmp/Unity.ulf -quit || true
+        - name: build-wechat
+          script: |
+            set -e
+            unity-editor -batchmode -nographics -logFile - \
+              -projectPath "$PWD" \
+              -buildTarget WebGL \
+              -executeMethod T2FBuild.Editor.BuildEntry.BuildWeChat \
+              -quit
+        - name: upload-asset-bundles
+          script: |
+            if [ "$UPLOAD" != "true" ]; then echo "UPLOAD=false, skipping"; exit 0; fi
+            if [ ! -f Build/WebGL_wechat/upload-manifest.json ]; then echo "No AB manifest"; exit 0; fi
+            pip install -r tools/requirements.txt
+            python tools/upload-cos.py --manifest Build/WebGL_wechat/upload-manifest.json
+        - name: upload-wechat-first-package
+          script: |
+            if [ "$UPLOAD" != "true" ]; then echo "UPLOAD=false, skipping"; exit 0; fi
+            if [ ! -f Build/WebGL_wechat/wechat-first-package-manifest.json ]; then exit 0; fi
+            python tools/upload-cos.py --manifest Build/WebGL_wechat/wechat-first-package-manifest.json
+        - name: pack-minigame-artifact
+          # MiniGame folder is the artifact the developer downloads and uploads
+          # via 微信开发者工具 (WeChat DevTools). We push it to the CNB Docker
+          # registry as a thin image so it's browseable in the CNB UI.
+          script: |
+            cd Build/WebGL_wechat
+            tar czf minigame.tar.gz minigame/
+            echo "Artifact: Build/WebGL_wechat/minigame.tar.gz"
+
+# ---------- Tag-based: WebGL prod release ----------
+"v*":
+  tag_push:
+    - name: build-webgl-release
+      runner:
+        cpus: 8
+      docker: *docker-unity-webgl
+      imports: *imports
+      env:
+        T2FBUILD_UPLOAD_ENABLED: 'false'
+        BUILD_VERSION: ${CNB_BRANCH#v}   # strip the leading "v"
+        BUILD_NUMBER: ${CNB_BUILD_ID}
+        BUILD_ENV: prod
+      stages:
+        - name: activate-unity-license
+          script: |
+            set -e
+            echo "$UNITY_LICENSE_BASE64" | base64 -d > /tmp/Unity.ulf
+            unity-editor -batchmode -nographics -logFile - \
+              -manualLicenseFile /tmp/Unity.ulf -quit || true
+        - name: build-webgl
+          script: |
+            set -e
+            unity-editor -batchmode -nographics -logFile - \
+              -projectPath "$PWD" \
+              -buildTarget WebGL \
+              -executeMethod T2FBuild.Editor.BuildEntry.BuildWebGL \
+              -quit
+        - name: upload-asset-bundles
+          script: |
+            set -e
+            pip install -r tools/requirements.txt
+            python tools/upload-cos.py --manifest Build/WebGL/upload-manifest.json
+        - name: upload-webgl-player
+          script: |
+            set -e
+            python tools/upload-cos.py \
+              --dir Build/WebGL/Player \
+              --remote-prefix "webgl/prod/${BUILD_VERSION}/"
+
+# ---------- Tag-based: WeChat MiniGame prod release ----------
+"wx-v*":
+  tag_push:
+    - name: build-wechat-release
+      runner:
+        cpus: 8
+      docker: *docker-unity-webgl
+      imports: *imports
+      env:
+        T2FBUILD_UPLOAD_ENABLED: 'false'
+        BUILD_VERSION: ${CNB_BRANCH#wx-v}   # strip the leading "wx-v"
+        BUILD_NUMBER: ${CNB_BUILD_ID}
+        BUILD_ENV: prod
+      stages:
+        - name: install-node
+          script: |
+            set -e
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+            apt-get install -y nodejs
+        - name: activate-unity-license
+          script: |
+            set -e
+            echo "$UNITY_LICENSE_BASE64" | base64 -d > /tmp/Unity.ulf
+            unity-editor -batchmode -nographics -logFile - \
+              -manualLicenseFile /tmp/Unity.ulf -quit || true
+        - name: build-wechat
+          script: |
+            set -e
+            unity-editor -batchmode -nographics -logFile - \
+              -projectPath "$PWD" \
+              -buildTarget WebGL \
+              -executeMethod T2FBuild.Editor.BuildEntry.BuildWeChat \
+              -quit
+        - name: upload-asset-bundles
+          script: |
+            set -e
+            pip install -r tools/requirements.txt
+            python tools/upload-cos.py --manifest Build/WebGL_wechat/upload-manifest.json
+        - name: upload-wechat-first-package
+          script: |
+            set -e
+            python tools/upload-cos.py --manifest Build/WebGL_wechat/wechat-first-package-manifest.json
+        - name: pack-minigame-artifact
+          script: |
+            cd Build/WebGL_wechat
+            tar czf minigame.tar.gz minigame/
+            echo "Artifact: Build/WebGL_wechat/minigame.tar.gz"
+            echo "Download and import into 微信开发者工具 (WeChat DevTools)."

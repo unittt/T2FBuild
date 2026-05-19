@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
-using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 namespace T2FBuild.Editor
 {
@@ -13,13 +12,44 @@ namespace T2FBuild.Editor
     {
         const string MenuPath = "Window/T2FBuild/CI Template Installer";
 
-        const string PackageWorkflowsRelativePath = "CI/Templates~/workflows";
-
         const string PackageToolsRelativePath = "CI/Templates~/tools";
 
-        const string ProjectWorkflowsRelativePath = ".github/workflows";
-
         const string ProjectToolsRelativePath = "tools";
+
+        const string EditorPrefsPlatformKey = "T2FBuild.CIPlatform";
+
+        static readonly CIPlatformDef[] Platforms =
+        {
+            new CIPlatformDef
+            {
+                Id = "github",
+                DisplayName = "GitHub Actions",
+                TemplatesSubDir = "CI/Templates~/github/workflows",
+                ResolveProjectRelTarget = fn => $".github/workflows/{fn}",
+                TargetLabel = "Workflows → .github/workflows/",
+                OpenButtonLabel = "Open .github/workflows",
+                OpenButtonRelPath = ".github/workflows",
+                PostInstallNote =
+                    "Configure repo Secrets at GitHub repo > Settings > Secrets and variables > Actions:\n" +
+                    "  UNITY_LICENSE, TENCENT_SECRET_ID, TENCENT_SECRET_KEY, COS_BUCKET, COS_REGION",
+            },
+            new CIPlatformDef
+            {
+                Id = "cnb",
+                DisplayName = "CNB",
+                TemplatesSubDir = "CI/Templates~/cnb",
+                ResolveProjectRelTarget = _ => ".cnb.yml",
+                TargetLabel = "Pipeline → <repo>/.cnb.yml",
+                OpenButtonLabel = "Open repo root",
+                OpenButtonRelPath = ".",
+                PostInstallNote =
+                    "CNB has no per-repo Secrets UI. One-time setup:\n" +
+                    "  1. Create a PRIVATE repo (e.g. https://cnb.cool/<your-org>/secrets) with envs.yml\n" +
+                    "     containing UNITY_LICENSE_BASE64, TENCENT_SECRET_ID/KEY, COS_BUCKET, COS_REGION.\n" +
+                    "  2. Edit the imports: URL inside .cnb.yml — replace REPLACE_ME_ORG.\n" +
+                    "  3. See the comment block at the top of .cnb.yml for full instructions.",
+            },
+        };
 
         readonly List<WorkflowTemplate> _workflows = new List<WorkflowTemplate>();
 
@@ -31,35 +61,47 @@ namespace T2FBuild.Editor
 
         string _projectRoot;
 
+        int _platformIndex;
+
         Vector2 _scroll;
 
         [MenuItem(MenuPath)]
         public static void Open()
         {
             var win = GetWindow<CITemplateInstallerWindow>("T2FBuild CI Installer");
-            win.minSize = new Vector2(520, 360);
+            win.minSize = new Vector2(540, 400);
         }
 
-        void OnEnable() => Refresh();
+        void OnEnable()
+        {
+            _platformIndex = ResolveSavedPlatformIndex();
+            Refresh();
+        }
+
+        CIPlatformDef CurrentPlatform => Platforms[_platformIndex];
 
         void Refresh()
         {
             _projectRoot = Path.GetDirectoryName(Application.dataPath);
-            _packageRoot = ResolvePackageRoot();
+            _packageRoot = T2FBuildPackagePath.ResolveRoot();
             _workflows.Clear();
 
             if (string.IsNullOrEmpty(_packageRoot)) return;
 
-            var workflowsDir = Path.Combine(_packageRoot, PackageWorkflowsRelativePath);
+            var platform = CurrentPlatform;
+            var workflowsDir = Path.Combine(_packageRoot, platform.TemplatesSubDir);
             if (!Directory.Exists(workflowsDir)) return;
 
             foreach (var path in Directory.GetFiles(workflowsDir, "*.yml").OrderBy(p => p))
             {
+                var fileName = Path.GetFileName(path);
+                var rel = platform.ResolveProjectRelTarget(fileName);
                 _workflows.Add(new WorkflowTemplate
                 {
-                    FileName = Path.GetFileName(path),
+                    FileName = fileName,
                     SourcePath = path,
-                    TargetPath = Path.Combine(_projectRoot, ProjectWorkflowsRelativePath, Path.GetFileName(path)),
+                    TargetPath = Path.Combine(_projectRoot, rel),
+                    TargetRelLabel = rel,
                 });
             }
 
@@ -75,11 +117,15 @@ namespace T2FBuild.Editor
             if (string.IsNullOrEmpty(_packageRoot))
             {
                 EditorGUILayout.HelpBox(
-                    "Could not resolve the T2FBuild package on disk. Is the package installed?",
+                    "Could not resolve the T2FBuild package on disk. " +
+                    "Expected either a UPM package (Packages/manifest.json) or an embedded folder (Assets/T2FBuild) with package.json next to the asmdef.",
                     MessageType.Error);
                 if (GUILayout.Button("Refresh")) Refresh();
                 return;
             }
+
+            DrawPlatformPicker();
+            EditorGUILayout.Space();
 
             EditorGUILayout.LabelField("Package", PathOrDash(_packageRoot), EditorStyles.miniLabel);
             EditorGUILayout.LabelField("Project", PathOrDash(_projectRoot), EditorStyles.miniLabel);
@@ -88,7 +134,7 @@ namespace T2FBuild.Editor
             if (_workflows.Count == 0)
             {
                 EditorGUILayout.HelpBox(
-                    $"No workflow templates found under '{PackageWorkflowsRelativePath}'.",
+                    $"No templates found under '{CurrentPlatform.TemplatesSubDir}'.",
                     MessageType.Warning);
                 if (GUILayout.Button("Refresh")) Refresh();
                 return;
@@ -103,9 +149,27 @@ namespace T2FBuild.Editor
             DrawFooterButtons();
         }
 
+        void DrawPlatformPicker()
+        {
+            var labels = Platforms.Select(p => new GUIContent(p.DisplayName)).ToArray();
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField(
+                    new GUIContent("CI Platform", "Select the CI/CD platform this project is hosted on. Each platform ships its own set of pipeline templates."),
+                    GUILayout.Width(80));
+                var newIndex = EditorGUILayout.Popup(_platformIndex, labels);
+                if (newIndex != _platformIndex)
+                {
+                    _platformIndex = newIndex;
+                    EditorPrefs.SetString(EditorPrefsPlatformKey, CurrentPlatform.Id);
+                    Refresh();
+                }
+            }
+        }
+
         void DrawWorkflowList()
         {
-            EditorGUILayout.LabelField("Workflows to copy into .github/workflows/", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(CurrentPlatform.TargetLabel, EditorStyles.boldLabel);
 
             _scroll = EditorGUILayout.BeginScrollView(_scroll, EditorStyles.helpBox);
             for (var i = 0; i < _workflows.Count; i++)
@@ -119,7 +183,7 @@ namespace T2FBuild.Editor
                         GUILayout.Width(220));
 
                     var status = File.Exists(wf.TargetPath) ? "exists (will overwrite)" : "new";
-                    EditorGUILayout.LabelField(status, EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField($"→ {wf.TargetRelLabel}  [{status}]", EditorStyles.miniLabel);
                 }
             }
             EditorGUILayout.EndScrollView();
@@ -133,7 +197,7 @@ namespace T2FBuild.Editor
             _copyTools = EditorGUILayout.ToggleLeft(
                 new GUIContent(
                     $"Also copy tools/ (upload-cos.py, requirements.txt, README.md){statusText}",
-                    "Required by workflows that upload to Tencent COS. " +
+                    "Required by workflows that upload to Tencent COS. Shared across all CI platforms. " +
                     "Commit the copied files so the CI runner can find them at <project>/tools/."),
                 _copyTools);
         }
@@ -157,11 +221,12 @@ namespace T2FBuild.Editor
                 {
                     Refresh();
                 }
-                using (new EditorGUI.DisabledScope(!Directory.Exists(Path.Combine(_projectRoot, ProjectWorkflowsRelativePath))))
+                var openPath = Path.Combine(_projectRoot, CurrentPlatform.OpenButtonRelPath);
+                using (new EditorGUI.DisabledScope(!Directory.Exists(openPath)))
                 {
-                    if (GUILayout.Button("Open .github/workflows"))
+                    if (GUILayout.Button(CurrentPlatform.OpenButtonLabel))
                     {
-                        EditorUtility.RevealInFinder(Path.Combine(_projectRoot, ProjectWorkflowsRelativePath));
+                        EditorUtility.RevealInFinder(openPath);
                     }
                 }
                 using (new EditorGUI.DisabledScope(!Directory.Exists(Path.Combine(_projectRoot, ProjectToolsRelativePath))))
@@ -198,12 +263,12 @@ namespace T2FBuild.Editor
                     EnsureDir(Path.GetDirectoryName(wf.TargetPath));
                     File.Copy(wf.SourcePath, wf.TargetPath, overwrite: true);
                     copied++;
-                    summary.AppendLine($"✓ .github/workflows/{wf.FileName}");
+                    summary.AppendLine($"✓ {wf.TargetRelLabel}");
                 }
                 catch (Exception e)
                 {
                     failed++;
-                    summary.AppendLine($"✗ .github/workflows/{wf.FileName}: {e.Message}");
+                    summary.AppendLine($"✗ {wf.TargetRelLabel}: {e.Message}");
                 }
             }
 
@@ -233,16 +298,27 @@ namespace T2FBuild.Editor
             }
 
             var header = failed == 0
-                ? $"Installed {copied} item(s) successfully."
-                : $"Installed {copied} item(s); {failed} failed.";
+                ? $"Installed {copied} item(s) successfully for {CurrentPlatform.DisplayName}."
+                : $"Installed {copied} item(s); {failed} failed. Target: {CurrentPlatform.DisplayName}.";
 
             EditorUtility.DisplayDialog(
                 "T2FBuild CI Installer",
                 header + "\n\n" + summary +
-                "\nRemember to commit the new files so CI can find them.",
+                "\nNext steps:\n" + CurrentPlatform.PostInstallNote +
+                "\n\nRemember to commit the new files so CI can find them.",
                 "OK");
 
             Refresh();
+        }
+
+        static int ResolveSavedPlatformIndex()
+        {
+            var saved = EditorPrefs.GetString(EditorPrefsPlatformKey, Platforms[0].Id);
+            for (var i = 0; i < Platforms.Length; i++)
+            {
+                if (Platforms[i].Id == saved) return i;
+            }
+            return 0;
         }
 
         static void CopyDirectoryRecursive(string src, string dst)
@@ -265,12 +341,6 @@ namespace T2FBuild.Editor
             }
         }
 
-        static string ResolvePackageRoot()
-        {
-            var info = PackageInfo.FindForAssembly(typeof(CITemplateInstallerWindow).Assembly);
-            return info?.resolvedPath;
-        }
-
         static string PathOrDash(string path) => string.IsNullOrEmpty(path) ? "—" : path;
 
         class WorkflowTemplate
@@ -280,6 +350,27 @@ namespace T2FBuild.Editor
             public string SourcePath;
 
             public string TargetPath;
+
+            public string TargetRelLabel;
+        }
+
+        class CIPlatformDef
+        {
+            public string Id;
+
+            public string DisplayName;
+
+            public string TemplatesSubDir;
+
+            public Func<string, string> ResolveProjectRelTarget;
+
+            public string TargetLabel;
+
+            public string OpenButtonLabel;
+
+            public string OpenButtonRelPath;
+
+            public string PostInstallNote;
         }
     }
 }

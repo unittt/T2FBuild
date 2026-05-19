@@ -127,25 +127,26 @@ T2FBuild/                                # 独立 Git 仓库根
     │   └── T2FBuildSettingsProvider.cs   # 接入 Edit > Project Settings > T2FBuild
     ├── CI/
     │   └── Templates~/                  # `~` 结尾不被 Unity 导入
-    │       ├── workflows/
-    │       │   ├── build.yml
-    │       │   ├── android.yml
-    │       │   ├── ios.yml
-    │       │   ├── webgl.yml           # 首期已实现：构建 + AB + Player 双上传
-    │       │   └── wechat.yml
-    │       └── tools/
+    │       ├── github/                  # GitHub Actions 模板（多文件 → .github/workflows/）
+    │       │   └── workflows/
+    │       │       ├── webgl.yml        # 已实现：WebGL 构建 + AB + Player 双上传
+    │       │       ├── wechat.yml       # 已实现：微信小游戏 + 首包数据上传 + minigame artifact
+    │       │       ├── android.yml      # 后期
+    │       │       └── ios.yml          # 后期
+    │       ├── cnb/                     # CNB 模板（单文件 → <repo>/.cnb.yml）
+    │       │   └── cnb.yml              # 已实现：webgl + wechat 触发块都在一个 yml 里
+    │       └── tools/                   # 共用（与 CI 平台无关）
     │           ├── upload-cos.py       # 双模式：--manifest 或 --dir，自动设置 Content-Type/Encoding
     │           ├── requirements.txt
     │           └── README.md
     └── Window/
-    └── Window/
-        ├── CITemplateInstallerWindow.cs  # 一键复制 CI 模板到项目（多选）
+        ├── CITemplateInstallerWindow.cs  # 一键复制 CI 模板到项目（CI 平台下拉 + 多选）
         └── BuildWindow.cs                # 开发期一键打包窗口（后期）
 ```
 
 **为什么 Runtime 几乎为空**：框架只在 Editor 工作，玩家运行时不需要任何代码；AB 加载由业务侧的 `T2FResource` 处理，避免重复职责。
 
-**为什么 Templates 用 `~` 后缀**：Unity 不会扫描带 `~` 后缀的目录，避免模板里的 yml/py 被当成资源处理。`CITemplateInstallerWindow`（`Window > T2FBuild > CI Template Installer`）扫描该目录列出可安装的 workflow，开发者勾选后一键复制到项目的 `.github/workflows/` 和 `tools/`。
+**为什么 Templates 用 `~` 后缀**：Unity 不会扫描带 `~` 后缀的目录，避免模板里的 yml/py 被当成资源处理。子目录按 CI 平台分组（`github/`、`cnb/`、`tools/`），`CITemplateInstallerWindow`（`Window > T2FBuild > CI Template Installer`）顶部有 CI 平台下拉，根据选择的平台扫描对应子目录列出可安装的模板，开发者勾选后一键复制到项目对应位置（GitHub → `.github/workflows/`，CNB → `<repo>/.cnb.yml`）。
 
 ---
 
@@ -343,33 +344,71 @@ GitHub Actions yml：
 
 ---
 
-## 7. GitHub Actions 工作流编排
+## 7. CI 工作流编排
 
-仓库根 `.github/workflows/`（由框架模板复制并定制）：
+框架的 Unity 端 (`BuildEntry` CLI、`upload-cos.py`、AB/Uploader 抽象) 是 CI 平台无关的，只有 workflow yaml 因平台而异。模板按平台分目录，`CITemplateInstallerWindow` 让用户在 Project 内一键安装。
 
-- **build.yml**：主入口，`workflow_dispatch` + `tag push`，矩阵触发各平台（v0.1 未实现，单平台时直接用平台 yml）
-- **android.yml / ios.yml / webgl.yml / wechat.yml**：被调用的 reusable workflow
-- 公共步骤：checkout → restore Library cache → game-ci/unity-builder → 上传 AB → 上传产物
+**当前支持的 CI 平台**：
 
-**首期已实现：webgl.yml**
+| 平台 | 模板路径 | 目标位置 | 状态 |
+|---|---|---|---|
+| GitHub Actions | `CI/Templates~/github/workflows/*.yml` | `<repo>/.github/workflows/*.yml`（多文件） | ✅ |
+| CNB（cnb.cool） | `CI/Templates~/cnb/cnb.yml` | `<repo>/.cnb.yml`（单文件） | ✅ |
+| Jenkins | — | — | ⏳ 未来 |
+| 腾讯云 CODING | — | — | ⏳ 未来 |
 
-- 触发：`workflow_dispatch`（version / env / upload 三个 input）+ `push tags v*`（自动 prod + upload）
-- 单 job 顺序：checkout → 计算参数 → 缓存 Library → game-ci/unity-builder 调 `BuildEntry.BuildWebGL`（`T2FBUILD_UPLOAD_ENABLED=false`，让 Unity 早退出释放 license）→ 安装 Python → 调 `upload-cos.py --manifest` 上传 AB → 调 `upload-cos.py --dir Build/WebGL/Player --remote-prefix webgl/<env>/<version>/` 上传整个 player → upload-artifact → job summary 输出可访问 URL
+新增 CI 平台只需向 [CITemplateInstallerWindow.cs](../Editor/Window/CITemplateInstallerWindow.cs) 的 `Platforms` 数组追加一个 `CIPlatformDef`（`Id`、`TemplatesSubDir`、`ResolveProjectRelTarget` 等字段）并在 `CI/Templates~/<id>/` 下放对应模板，**不改 Installer 逻辑**。
+
+### 7.1 GitHub Actions（首期落地）
+
+- 触发：`workflow_dispatch`（version / env / upload 三个 input）+ `push tags v*` / `wx-v*`（自动 prod + upload）
+- 单 job 顺序：checkout → 计算参数 → 缓存 Library → `game-ci/unity-builder` 调 `BuildEntry.BuildWebGL`（`T2FBUILD_UPLOAD_ENABLED=false`，让 Unity 早退出释放 license）→ 安装 Python → 调 `upload-cos.py --manifest` 上传 AB → 调 `upload-cos.py --dir Build/WebGL/Player --remote-prefix webgl/<env>/<version>/` 上传整个 player → upload-artifact → job summary 输出可访问 URL
 - COS 直接作为 WebGL 静态托管：`upload-cos.py` 按扩展名设置 `Content-Type` 和 `Content-Encoding`（`.br` → `br`, `.gz` → `gzip`），无需 COS 端额外配置
 - 并发控制：`concurrency.group=webgl-<ref>` + `cancel-in-progress`，避免同分支堆积
 
-**Secrets**：
+**Secrets**（GitHub 仓库 Settings > Secrets and variables > Actions）：
 - `UNITY_LICENSE` — GameCI Personal license（`.ulf` 文件内容，通过 `unity-request-activation-file` 获取）
 - `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY` / `COS_BUCKET` / `COS_REGION` — COS 上传
 - `ANDROID_KEYSTORE_BASE64` / `ANDROID_KEYSTORE_PASS` / `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASS`（后期）
 - `IOS_P12_BASE64` / `IOS_P12_PASS` / `IOS_PROVISION_BASE64`（后期）
-- `WECHAT_APPID`（后期，可选）
 
-**关键缓存**：`Library/` 目录，冷启动 10+ 分钟、热启动 1-2 分钟。Library 缓存 key 包含 `Assets/**`、`Packages/**`、`ProjectSettings/**` 的 hash。
+### 7.2 CNB（v0.2 新增）
 
-**项目接入步骤**：
+CNB 与 GitHub 关键差异决定了模板形态：
+
+| 维度 | GitHub Actions | CNB |
+|---|---|---|
+| 配置文件 | `.github/workflows/<name>.yml`（多文件） | `.cnb.yml`（仓库根单文件）|
+| 触发结构 | 每个文件一个 workflow | 一个文件多个 `<branch/tag pattern>: <event>:` 块 |
+| Unity license | GameCI `unity-builder@v4` 封装 | 自己装 `unityci/editor` + `-manualLicenseFile <ulf>` |
+| Secrets | 仓库 Secrets UI | 另起一个私有 repo 存 `envs.yml`，通过 `imports:` 引用 |
+| 缓存 | `actions/cache` + hash key | `docker.volumes` + `:copy-on-write`（粘 runner 节点）|
+| 并发取消 | `concurrency.cancel-in-progress` | `lock.key` 互斥 |
+| 致命约束 | — | 单 stage 无 log 输出 >10min 直接 kill（Unity batchmode 默认 verbose，通常无虞） |
+
+CNB 模板单文件包含 4 个触发块（webgl 手动 / wechat 手动 / `v*` 标签 / `wx-v*` 标签），Unity 命令、`upload-cos.py` 调用与 GitHub 一致，仅外层 yaml 语法不同。Library 缓存通过 `volumes: ["/workspace/Library:copy-on-write"]` 实现。
+
+**Secrets 设置**（一次性，按项目）：
+1. 创建私有 repo `https://cnb.cool/<your-org>/secrets`，提交 `envs.yml`：
+   ```yaml
+   env:
+     UNITY_LICENSE_BASE64: <base64(.ulf)>
+     TENCENT_SECRET_ID: ...
+     TENCENT_SECRET_KEY: ...
+     COS_BUCKET: ...
+     COS_REGION: ...
+   ```
+2. 编辑安装后的 `.cnb.yml` 顶部 `imports:` URL，把 `REPLACE_ME_ORG` 改成实际组织名
+
+### 7.3 Library 缓存
+
+无论哪个 CI 平台，Unity 的 `Library/` 目录冷启动 10+ 分钟、热启动 1-2 分钟。
+- GitHub：`actions/cache@v4`，key 含 `Assets/**`、`Packages/**`、`ProjectSettings/**` 的 hash
+- CNB：`docker.volumes` 持久化，粘 runner 节点
+
+**项目接入步骤**（GitHub Actions 路径，CNB 见 §7.2）：
 1. `cp -r <package>/CI/Templates~/tools <project>/tools` 并提交
-2. `cp <package>/CI/Templates~/workflows/webgl.yml <project>/.github/workflows/` 并提交
+2. `cp <package>/CI/Templates~/github/workflows/webgl.yml <project>/.github/workflows/` 并提交
 3. 配置上述 GitHub Secrets
 4. tag push 或 workflow_dispatch 触发
 
@@ -399,7 +438,7 @@ GitHub Actions yml：
 
 通过 `Edit > Project Settings > T2FBuild` 编辑 `T2FBuildSettings`（自动创建到 `ProjectSettings/T2FBuildSettings.asset`），随项目提交即可。
 
-打开 `Window > T2FBuild > CI Template Installer` 选择需要的 workflow（多选），勾选「Also copy tools/」一并安装 Python 上传脚本，点 Apply 自动写入到 `<project>/.github/workflows/` 和 `<project>/tools/`，提交即可。
+打开 `Window > T2FBuild > CI Template Installer`，顶部选择 CI 平台（GitHub Actions 或 CNB），勾选需要的模板，勾选「Also copy tools/」一并安装 Python 上传脚本，点 Apply 自动写入到对应位置（GitHub → `<project>/.github/workflows/`，CNB → `<project>/.cnb.yml`）和 `<project>/tools/`，提交即可。
 
 ---
 

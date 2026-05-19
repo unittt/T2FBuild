@@ -1,13 +1,13 @@
 # T2FBuild Roadmap
 
-> 状态：v0.1 阶段 — WebGL CI 闭环 + 微信小游戏已完成
+> 状态：v0.1 阶段 — WebGL CI 闭环 + 微信小游戏 + 多 CI 平台（GitHub/CNB）已完成
 > 最后更新：2026-05-19
 
 里程碑划分对应 [docs/design.md](design.md) §10。每个 PR 完成后应回到本文件勾选状态、补充 commit。
 
 ---
 
-## 已完成（v0.1 — WebGL CI 闭环 + 微信小游戏）
+## 已完成（v0.1 — WebGL CI 闭环 + 微信小游戏 + 多 CI 平台）
 
 | # | 内容 | 关键产物 | Commit |
 |---|------|----------|--------|
@@ -16,10 +16,11 @@
 | 3 | 上传抽象 + Tencent COS | `IAssetBundleUploader`, `UploadManifest`, `TencentCosUploader`（Python 壳），`upload-cos.py` + `RegistryScanner` 抽取 | `9f8483a` |
 | 4 | GitHub Actions webgl.yml | 完整 CI 链路 + Player 直传 COS 静态托管（`--dir` 模式 + Content-Type/Encoding） | `55ed497` |
 | 6 | **WeChat 小游戏** | `WeChatBuilder`（profile=wechat，versionDefines 隔离）+ `ConfigureWeChatProjectStep` / `RunWeChatExportStep`（一行调 `WXConvertCore.DoExport`）/ `ValidateWeChatPackageSizeStep`（4MB 主包检查）/ `UploadWeChatFirstPackageStep`（首包数据→COS 复用 manifest 协议）+ `wechat.yml`（Node + AB/首包双 manifest 上传 + minigame artifact） | pending |
-| – | 编辑器辅助 — CI 模板安装器 | `CITemplateInstallerWindow`（多选 + 自动连带 `tools/`） | `3a53391` |
+| – | **多 CI 平台支持（GitHub + CNB）** | `CI/Templates~/` 按 `github/` / `cnb/` 分目录；`CITemplateInstallerWindow` 顶部新增 CI Platform 下拉 + 选择持久化到 EditorPrefs + per-platform target 路径策略；CNB `cnb.yml` 单文件含 webgl/wechat 双触发 + ULF base64 license 激活 + Library `copy-on-write` 缓存；secrets 走 `imports:` 私有 repo | pending |
+| – | 编辑器辅助 — CI 模板安装器 | `CITemplateInstallerWindow`（CI 平台下拉 + 多选 + 自动连带 `tools/`） | `3a53391` |
 | – | 编辑器辅助 — 配置单例 | `T2FBuildSettings` + Project Settings UI（注册表驱动下拉框） | `c1bc7cd` |
 
-设计文档对应章节：§4（结构）、§5（抽象）、§7（CI）、§8（平台）。
+设计文档对应章节：§4（结构）、§5（抽象）、§7（CI，含 GitHub + CNB 对比）、§8（平台）。
 
 ---
 
@@ -89,6 +90,8 @@
 
 ### CI 平台扩展
 
+GitHub Actions、CNB 已落地（见已完成表）。可按需追加：
+
 - 自建 Jenkins
 - 腾讯云 CODING DevOps（国内镜像更快）
 - 本地 Mac mini 池（iOS 专用）
@@ -109,4 +112,5 @@
 - `GenerateUploadManifestStep` 使用 `Path.GetRelativePath`（.NET Standard 2.1），Unity 2022.3 OK，若兼容更老版本需替换
 - `IAssetBundleUploader.UploadAsync` 返回 Task，目前 step 端 `.GetAwaiter().GetResult()` 阻塞 — 后续若引入 `IAsyncBuildStep`，整条流水线可异步化
 - `upload-cos.py` `--dir` 模式不计算 SHA256（速度优先），增量上传需要时再补
+- CNB pipeline 模板未做端到端验证：`unity-editor` 命令名、Library 缓存挂载路径（`/workspace/Library` 假设可能不准）、`-manualLicenseFile` 是否需要额外的 `-serial` 配合等，要在 BounceBlast 真跑一次 CNB pipeline 才能确认
 - 三个反射注册器（`PlatformBuilder` / `AssetBundleProvider` / `AssetBundleUploader`）现已通过 `RegistryScanner` 抽取共用扫描；若再加第四个，考虑泛型 `NamedRegistry<TInterface, TAttribute>` 进一步压缩

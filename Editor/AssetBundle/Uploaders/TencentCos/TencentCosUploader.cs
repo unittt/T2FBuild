@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using UnityEditor.PackageManager;
+using T2FBuild.Editor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
@@ -102,10 +102,10 @@ namespace T2FBuild.Editor.Uploaders.TencentCos
                 if (File.Exists(projectTool)) return projectTool;
             }
 
-            var pkgInfo = PackageInfo.FindForAssembly(typeof(TencentCosUploader).Assembly);
-            if (pkgInfo != null)
+            var packageRoot = T2FBuildPackagePath.ResolveRoot();
+            if (!string.IsNullOrEmpty(packageRoot))
             {
-                var pkgPath = Path.Combine(pkgInfo.resolvedPath, ScriptRelativePath);
+                var pkgPath = Path.Combine(packageRoot, ScriptRelativePath);
                 if (File.Exists(pkgPath)) return pkgPath;
             }
 
