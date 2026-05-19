@@ -18,6 +18,19 @@ namespace T2FBuild.Editor
 
         public bool uploadEnabledByDefault;
 
+        [Header("WeChat MiniGame")]
+        public string wechatAppId = "";
+
+        public string wechatCdnBaseUrl = "";
+
+        public string wechatCustomNodePath = "";
+
+        public string wechatFirstPackageGlob = "webgl.data*";
+
+        public string wechatFirstPackageRemotePrefixTemplate = "wechat/{env}/{version}/data/";
+
+        public int wechatMainPackageSizeLimitMB = 4;
+
         public void SaveSettings() => Save(true);
     }
 }

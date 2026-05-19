@@ -1,13 +1,13 @@
 # T2FBuild Roadmap
 
-> 状态：v0.1 阶段 — WebGL CI 闭环已完成
-> 最后更新：2026-05-18
+> 状态：v0.1 阶段 — WebGL CI 闭环 + 微信小游戏已完成
+> 最后更新：2026-05-19
 
 里程碑划分对应 [docs/design.md](design.md) §10。每个 PR 完成后应回到本文件勾选状态、补充 commit。
 
 ---
 
-## 已完成（v0.1 — WebGL CI 闭环）
+## 已完成（v0.1 — WebGL CI 闭环 + 微信小游戏）
 
 | # | 内容 | 关键产物 | Commit |
 |---|------|----------|--------|
@@ -15,6 +15,7 @@
 | 2 | WebGL + AB 抽象 + Addressables | `IAssetBundleProvider`, `WebGLBuilder`, `AddressablesProvider`（versionDefines 隔离） | `a717fa4` |
 | 3 | 上传抽象 + Tencent COS | `IAssetBundleUploader`, `UploadManifest`, `TencentCosUploader`（Python 壳），`upload-cos.py` + `RegistryScanner` 抽取 | `9f8483a` |
 | 4 | GitHub Actions webgl.yml | 完整 CI 链路 + Player 直传 COS 静态托管（`--dir` 模式 + Content-Type/Encoding） | `55ed497` |
+| 6 | **WeChat 小游戏** | `WeChatBuilder`（profile=wechat，versionDefines 隔离）+ `ConfigureWeChatProjectStep` / `RunWeChatExportStep`（一行调 `WXConvertCore.DoExport`）/ `ValidateWeChatPackageSizeStep`（4MB 主包检查）/ `UploadWeChatFirstPackageStep`（首包数据→COS 复用 manifest 协议）+ `wechat.yml`（Node + AB/首包双 manifest 上传 + minigame artifact） | pending |
 | – | 编辑器辅助 — CI 模板安装器 | `CITemplateInstallerWindow`（多选 + 自动连带 `tools/`） | `3a53391` |
 | – | 编辑器辅助 — 配置单例 | `T2FBuildSettings` + Project Settings UI（注册表驱动下拉框） | `c1bc7cd` |
 
@@ -27,7 +28,6 @@
 | # | 内容 | 主要工作 | 状态 |
 |---|------|----------|------|
 | 5 | **Android** | `AndroidBuilder` + `SignAndroidStep`（keystore base64 → 文件 → 注入 PlayerSettings）+ `.apk` / `.aab` 产物 + `android.yml` workflow + Settings 中的 Android section | ⏳ |
-| 6 | **WeChat 小游戏** | `WeChatBuilder`（继承 WebGL 步骤 + `RunWeChatTransformStep`）+ `wechat.yml` + 主包 ≤4MB 检查 + AB 必须远程 | ⏳ |
 | 7 | **iOS** | `IOSBuilder`（macOS runner）+ Xcode 工程后处理（Info.plist / Capabilities）+ 证书导入步骤 + `ios.yml` | ⏳ |
 
 每个平台落地都包含：Builder + 必要 Step + workflow yml + Settings 字段补充。**新增平台只加文件、不改框架核心**（开闭原则）。
@@ -38,13 +38,6 @@
 - `Editor/Platforms/AndroidBuilder.cs` —— `[PlatformBuilder(BuildTarget.Android)]`，组合：`SwitchPlatform → ApplyVersion → BuildAssetBundle → SignAndroid → BuildPlayer → GenerateUploadManifest → UploadAssetBundle`（Player 产物不上传 COS，等分发平台逻辑）
 - `T2FBuildSettings` 追加：`androidKeystorePath`, `androidKeyAlias`, `androidPackageFormat: AAB|APK`, `androidAbiList`
 - `CI/Templates~/workflows/android.yml` —— 同 webgl.yml 结构，多一步 keystore base64 解码
-
-### WeChat 落地拆解
-
-- 依赖 `com.qq.weixin.minigame`（BounceBlast 已装）
-- `Editor/Steps/RunWeChatTransformStep.cs` —— 调微信工具链转换 WebGL 输出
-- `Editor/Platforms/WeChatBuilder.cs` —— `[PlatformBuilder(BuildTarget.WebGL, "wechat")]`（`BuildEntry.BuildWeChat` 已预留 profile）
-- 主包大小检查：`ValidateWeChatPackageSizeStep`
 
 ### iOS 落地拆解
 

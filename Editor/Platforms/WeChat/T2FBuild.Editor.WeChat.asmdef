@@ -1,0 +1,28 @@
+{
+    "name": "T2FBuild.Editor.WeChat",
+    "rootNamespace": "T2FBuild.Editor.Platforms.WeChat",
+    "references": [
+        "T2FBuild.Editor",
+        "T2FBuild.Runtime",
+        "WxEditor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "T2FBUILD_HAS_WECHAT"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.qq.weixin.minigame",
+            "expression": "0.0.0",
+            "define": "T2FBUILD_HAS_WECHAT"
+        }
+    ],
+    "noEngineReferences": false
+}

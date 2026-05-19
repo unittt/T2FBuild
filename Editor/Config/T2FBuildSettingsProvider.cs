@@ -20,7 +20,8 @@ namespace T2FBuild.Editor
                 guiHandler = OnGUI,
                 keywords = new HashSet<string>(new[]
                 {
-                    "T2F", "T2FBuild", "Build", "Asset", "Bundle", "Upload", "COS", "Addressables", "Provider", "Uploader"
+                    "T2F", "T2FBuild", "Build", "Asset", "Bundle", "Upload", "COS", "Addressables", "Provider", "Uploader",
+                    "WeChat", "MiniGame", "AppId"
                 }),
             };
         }
@@ -58,6 +59,33 @@ namespace T2FBuild.Editor
                 new GUIContent("Enabled By Default",
                     "Fallback for UploadAssetBundleStep when the T2FBUILD_UPLOAD_ENABLED env var is unset. CI workflows should set the env var explicitly; this toggle is for local dev convenience."),
                 settings.uploadEnabledByDefault);
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("WeChat MiniGame", EditorStyles.boldLabel);
+            settings.wechatAppId = EditorGUILayout.TextField(
+                new GUIContent("AppId",
+                    "WeChat MiniGame AppId (wxXXXXXXXXXXXXXXXX). Written into MiniGameConfig.asset before each WeChat export."),
+                settings.wechatAppId);
+            settings.wechatCdnBaseUrl = EditorGUILayout.TextField(
+                new GUIContent("CDN Base URL",
+                    "Full CDN/COS URL where first-package data files will be served from (e.g. https://mybucket-123.cos.ap-shanghai.myqcloud.com/). Combined with First Package Remote Prefix to produce the full CDN URL written into MiniGameConfig.CDN."),
+                settings.wechatCdnBaseUrl);
+            settings.wechatCustomNodePath = EditorGUILayout.TextField(
+                new GUIContent("Custom Node Path",
+                    "Absolute path to node.exe. Leave empty to use the node on system PATH (CI installs node via actions/setup-node)."),
+                settings.wechatCustomNodePath);
+            settings.wechatFirstPackageGlob = EditorGUILayout.TextField(
+                new GUIContent("First Package Glob",
+                    "Glob (relative to <DST>/minigame/) selecting heavy first-package data files that must be served from CDN. Default matches Unity's webgl.data* family."),
+                settings.wechatFirstPackageGlob);
+            settings.wechatFirstPackageRemotePrefixTemplate = EditorGUILayout.TextField(
+                new GUIContent("First Package Remote Prefix",
+                    "COS key prefix for the first-package data files. Tokens: {env} {version} {profile} {target}. The same prefix is written into MiniGameConfig.CDN so the runtime fetches them from CDN."),
+                settings.wechatFirstPackageRemotePrefixTemplate);
+            settings.wechatMainPackageSizeLimitMB = EditorGUILayout.IntField(
+                new GUIContent("Main Package Size Limit (MB)",
+                    "WeChat MiniGame main package size cap (4 MB platform limit). ValidateWeChatPackageSizeStep fails the build if the post-export main package exceeds this — first-package files matched by the glob above are excluded from the count."),
+                settings.wechatMainPackageSizeLimitMB);
 
             if (EditorGUI.EndChangeCheck())
             {

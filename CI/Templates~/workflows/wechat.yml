@@ -1,0 +1,171 @@
+# Copied from the T2FBuild package: CI/Templates~/workflows/wechat.yml
+# Source: https://github.com/unittt/T2FBuild
+#
+# === Required GitHub Secrets ===
+#   UNITY_LICENSE        GameCI .ulf file content (Personal license)
+#   TENCENT_SECRET_ID    Tencent Cloud API SecretId
+#   TENCENT_SECRET_KEY   Tencent Cloud API SecretKey
+#   COS_BUCKET           Bucket name (e.g. mybucket-1234567890)
+#   COS_REGION           Bucket region (e.g. ap-shanghai)
+#
+# === Required project setup ===
+#   - T2FBuild package referenced in Packages/manifest.json (git URL).
+#   - com.qq.weixin.minigame package installed (WeChat MiniGame SDK).
+#   - Project Settings > T2FBuild > WeChat MiniGame > AppId filled in.
+#   - tools/upload-cos.py and tools/requirements.txt copied from this package
+#     (CI/Templates~/tools/) into your project root. Commit them so CI can find them.
+#
+# === Triggers ===
+#   - workflow_dispatch:  manual run; pick version / env / upload toggle.
+#   - push tags wx-v*:    full prod build with version derived from the tag,
+#                         AB + first-package auto-uploaded to COS.
+#                         (The MiniGame main package is NOT uploaded — it stays
+#                         as a CI artifact; developer uploads it to WeChat via
+#                         the WeChat DevTools.)
+#
+name: WeChat MiniGame
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Build version (e.g. 1.0.0). Empty = derive from run number.'
+        required: false
+        type: string
+      env:
+        description: 'Build environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      upload:
+        description: 'Upload AB + first-package data to Tencent COS after build'
+        required: true
+        default: false
+        type: boolean
+  push:
+    tags:
+      - 'wx-v*'
+
+concurrency:
+  group: wechat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build WeChat MiniGame
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Compute build params
+        id: params
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/wx-v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/wx-v}" >> "$GITHUB_OUTPUT"
+            echo "env=prod"                             >> "$GITHUB_OUTPUT"
+            echo "upload=true"                          >> "$GITHUB_OUTPUT"
+          else
+            VERSION="${{ inputs.version }}"
+            [ -z "$VERSION" ] && VERSION="0.0.${{ github.run_number }}"
+            echo "version=$VERSION"                       >> "$GITHUB_OUTPUT"
+            echo "env=${{ inputs.env || 'dev' }}"         >> "$GITHUB_OUTPUT"
+            echo "upload=${{ inputs.upload || 'false' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-WeChat-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-WeChat-
+            Library-WebGL-
+            Library-
+
+      - name: Setup Node.js
+        # The WeChat SDK's WXConvertCore invokes Node-based tooling during conversion.
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build WeChat MiniGame with Unity (T2FBuild)
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          BUILD_VERSION: ${{ steps.params.outputs.version }}
+          BUILD_NUMBER:  ${{ github.run_number }}
+          BUILD_ENV:     ${{ steps.params.outputs.env }}
+          # Upload runs in a separate CI step after Unity exits so the license is freed early.
+          T2FBUILD_UPLOAD_ENABLED: 'false'
+        with:
+          targetPlatform: WebGL
+          buildMethod: T2FBuild.Editor.BuildEntry.BuildWeChat
+          allowDirtyBuild: true
+
+      - name: Setup Python
+        if: steps.params.outputs.upload == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: tools/requirements.txt
+
+      - name: Install COS uploader deps
+        if: steps.params.outputs.upload == 'true'
+        run: pip install -r tools/requirements.txt
+
+      - name: Upload Asset Bundles to Tencent COS
+        if: steps.params.outputs.upload == 'true' && hashFiles('Build/WebGL_wechat/upload-manifest.json') != ''
+        run: python tools/upload-cos.py --manifest Build/WebGL_wechat/upload-manifest.json
+        env:
+          TENCENT_SECRET_ID:  ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+          COS_BUCKET:         ${{ secrets.COS_BUCKET }}
+          COS_REGION:         ${{ secrets.COS_REGION }}
+
+      - name: Upload WeChat First-Package Data to Tencent COS
+        if: steps.params.outputs.upload == 'true' && hashFiles('Build/WebGL_wechat/wechat-first-package-manifest.json') != ''
+        run: python tools/upload-cos.py --manifest Build/WebGL_wechat/wechat-first-package-manifest.json
+        env:
+          TENCENT_SECRET_ID:  ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+          COS_BUCKET:         ${{ secrets.COS_BUCKET }}
+          COS_REGION:         ${{ secrets.COS_REGION }}
+
+      - name: Upload MiniGame artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeChat-MiniGame-${{ steps.params.outputs.version }}
+          path: Build/WebGL_wechat/minigame/
+          retention-days: 14
+
+      - name: Job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## WeChat MiniGame Build"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Version | \`${{ steps.params.outputs.version }}\` |"
+            echo "| Env     | \`${{ steps.params.outputs.env }}\` |"
+            echo "| Upload  | \`${{ steps.params.outputs.upload }}\` |"
+            echo ""
+            echo "**Next step:** download the \`WeChat-MiniGame-${{ steps.params.outputs.version }}\` artifact, then import \`minigame/\` into 微信开发者工具 (WeChat DevTools) and upload to the WeChat backend for review."
+            if [ "${{ steps.params.outputs.upload }}" = "true" ]; then
+              echo ""
+              echo "AB and first-package data files were uploaded to COS bucket \`${{ secrets.COS_BUCKET }}\` (region \`${{ secrets.COS_REGION }}\`)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
