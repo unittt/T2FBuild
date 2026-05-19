@@ -172,17 +172,21 @@ Unity → `Edit > Project Settings > T2FBuild`：
 
 ## 5. 本地先跑通（强烈推荐）
 
-避免在 CNB 上才发现 SDK 配置问题：
+避免在 CNB 上才发现 SDK 配置问题。打开 `Window > T2FBuild > Build`：
 
-```csharp
-// Unity Console
-T2FBuild.Editor.BuildEntry.BuildWeChat();
-```
+- **Target** 下拉选 `WebGL (wechat)`（注册表自动列出所有可用平台 + profile）
+- **Version**: `0.0.1`
+- **Env**: `dev`
+- **Upload to COS**: **取消勾选**（首次只验证本地构建链路，不传 COS）
+- 点 **Build** 按钮
 
 确认：
 - `Build/WebGL_wechat/minigame/` 出现
 - Console 中 `[T2FBuild] WeChat main package OK: X MB (limit 4 MB ...)`
+- 窗口底部状态条显示 `Build succeeded` + 耗时
 - 把 `minigame/` 拖进微信开发者工具能正常打开 + 预览运行
+
+> 也可以直接调静态方法：`T2FBuild.Editor.BuildEntry.BuildWeChat()`（参数走环境变量 `BUILD_VERSION` / `BUILD_ENV`，回退默认 `0.0.1` / `dev`）。CI 走的就是这个入口。
 
 本地过了再上 CNB。
 

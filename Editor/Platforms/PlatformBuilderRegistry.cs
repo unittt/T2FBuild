@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using UnityEditor;
 
@@ -21,6 +22,16 @@ namespace T2FBuild.Editor
                     "Decorate your builder class with [PlatformBuilder(target, profile)].");
             }
             return (IPlatformBuilder)Activator.CreateInstance(type);
+        }
+
+        public static IEnumerable<(BuildTarget target, string profile)> GetAll()
+        {
+            EnsureScanned();
+            return _builders.Keys
+                .Select(k => (k.target, profile: string.IsNullOrEmpty(k.profile) ? null : k.profile))
+                .OrderBy(k => k.target.ToString())
+                .ThenBy(k => k.profile ?? string.Empty)
+                .ToArray();
         }
 
         static void EnsureScanned()

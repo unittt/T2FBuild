@@ -22,13 +22,23 @@ namespace T2FBuild.Editor
 
         public static BuildContext FromEnvironment(BuildTarget target, string profile = null)
         {
+            return FromValues(
+                target,
+                profile,
+                GetEnv("BUILD_VERSION", "0.0.1"),
+                int.TryParse(GetEnv("BUILD_NUMBER", "0"), out var n) ? n : 0,
+                GetEnv("BUILD_ENV", "dev"));
+        }
+
+        public static BuildContext FromValues(BuildTarget target, string profile, string version, int buildNumber, string env)
+        {
             var ctx = new BuildContext
             {
                 Target = target,
                 Profile = profile,
-                Version = GetEnv("BUILD_VERSION", "0.0.1"),
-                BuildNumber = int.TryParse(GetEnv("BUILD_NUMBER", "0"), out var n) ? n : 0,
-                Env = GetEnv("BUILD_ENV", "dev"),
+                Version = string.IsNullOrEmpty(version) ? "0.0.1" : version,
+                BuildNumber = buildNumber,
+                Env = string.IsNullOrEmpty(env) ? "dev" : env,
             };
             var suffix = string.IsNullOrEmpty(profile) ? string.Empty : "_" + profile;
             ctx.OutputRoot = $"Build/{target}{suffix}/";
